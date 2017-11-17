@@ -227,7 +227,7 @@ class KVStore(object):
                 self.term = msg['term']
 
                 if msg['leader'] != self.leader:
-                    self.set_leader(['leader'])
+                    self.set_leader(msg['leader'])
                     print("{} recognizing {} as leader".format(self.my_id, self.leader))
 
         else:
