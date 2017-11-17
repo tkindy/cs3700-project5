@@ -13,7 +13,10 @@ SELECT_TIMEOUT = 0.1
 # Maximum amount of data to receive from the socket, in bytes
 MAX_BYTES = 2 ** 15
 # Inclusive election timeout bounds (min, max), in seconds
-ELECT_TO_BOUNDS = (0.5, 1)
+ELECT_TO_BOUNDS = (1, 2)
+# Leader heartbeat interval, in seconds. Should be less than the lower election timeout bound
+HEARTBEAT_INTERVAL = 0.5
+
 
 # Message type constants
 GET = 'get'
@@ -40,6 +43,8 @@ class KVStore(object):
     def __init__(self, my_id: str, replica_ids: list):
         self.my_id = my_id
         self.replica_ids = replica_ids
+
+        self.data = {}
 
         self.sock = self.build_socket()
         self.state = State.FOLLOWER
@@ -83,16 +88,28 @@ class KVStore(object):
         return sock
 
     def reset_timeout(self):
-        self.timeout = time() + uniform(ELECT_TO_BOUNDS[0], ELECT_TO_BOUNDS[1])
+        if self.state in [State.CANDIDATE, State.FOLLOWER]:
+            self.timeout = time() + uniform(ELECT_TO_BOUNDS[0], ELECT_TO_BOUNDS[1])
+
+        elif self.state is State.LEADER:
+            self.timeout = time() + HEARTBEAT_INTERVAL
+
+        else:
+            self.unknown_state()
 
     def run(self):
         """Run the key-value store."""
         while True:
+            print(self.my_id)
             if self.timeout - time() <= 0:
                 if self.state in [State.CANDIDATE, State.FOLLOWER]:
                     self.start_election()
-                else:  # TODO leader timeout
-                    pass
+
+                elif self.state is State.LEADER:
+                    self.append_entries([])
+
+                else:
+                    self.unknown_state()
 
             self.handle_message()
 
@@ -139,11 +156,21 @@ class KVStore(object):
             else:
                 self.unknown_state()
 
-    def handle_get(self, msg: dict):
-        self.fail_request(msg)
+    def handle_get(self, req: dict):
+        if req['key'] in self.data:
+            msg = self.build_base_response(req, 'ok')
+            msg['value'] = self.data[req['key']]
 
-    def handle_put(self, msg: dict):
-        self.fail_request(msg)
+            self.send_message(msg)
+
+        else:
+            self.fail_request(req)
+
+    def handle_put(self, req: dict):
+        self.data[req['key']] = req['value']
+
+        msg = self.build_base_response(req, 'ok')
+        self.send_message(msg)
 
     def fail_request(self, req: dict):
         msg = self.build_base_response(req, 'fail')
@@ -168,6 +195,8 @@ class KVStore(object):
         self.append_entries([])
 
     def append_entries(self, entries: list):
+        self.reset_timeout()
+
         for replica_id in self.replica_ids:
             msg = self.build_base_message(replica_id, APPEND)
             msg['entries'] = entries
@@ -175,18 +204,20 @@ class KVStore(object):
             self.send_message(msg)
 
     def handle_entries(self, msg: dict):
-        if self.state == State.LEADER:
+        if self.state is State.LEADER:
             self.drop_message(msg)
 
-        elif self.state == State.CANDIDATE:
+        elif self.state is State.CANDIDATE:
             if msg['term'] >= self.term:
                 self.state = State.FOLLOWER
                 self.term = msg['term']
                 self.leader = msg['src']
 
+                print("{} recognizing {} as leader".format(self.my_id, self.leader))
+
                 self.handle_entries(msg)
 
-        elif self.state == State.FOLLOWER:
+        elif self.state is State.FOLLOWER:
             if msg['term'] >= self.term:
                 self.term = msg['term']
 
