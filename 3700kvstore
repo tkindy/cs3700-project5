@@ -13,13 +13,14 @@ SELECT_TIMEOUT = 0.1
 # Maximum amount of data to receive from the socket, in bytes
 MAX_BYTES = 2 ** 15
 # Inclusive election timeout bounds (min, max), in seconds
-ELECT_TO_BOUNDS = (0.15, 0.3)
+ELECT_TO_BOUNDS = (0.5, 1)
 
 # Message type constants
 GET = 'get'
 PUT = 'put'
 REQ_VOTE = 'request_vote'
 VOTE = 'vote'
+APPEND = 'append_entries'
 
 REDIRECT = 'redirect'
 
@@ -43,8 +44,9 @@ class KVStore(object):
         self.sock = self.build_socket()
         self.state = State.FOLLOWER
         self.leader = 'FFFF'
-        self.timeout = 0
         self.term = 0
+
+        self.reset_timeout()
 
         self.voted_for = None
         self.votes = 0
@@ -53,21 +55,24 @@ class KVStore(object):
             GET: self.handle_get,
             PUT: self.handle_put,
             REQ_VOTE: self.drop_message,
-            VOTE: self.drop_message
+            VOTE: self.drop_message,
+            APPEND: self.handle_entries
         }
 
-        self.candidate_handlers = {  # TODO drop out of election if higher term number received on an append call
+        self.candidate_handlers = {
             GET: self.drop_message,  # TODO should queue request until new leader is decided
             PUT: self.drop_message,  # TODO should queue request until new leader is decided
             REQ_VOTE: self.drop_message,
-            VOTE: self.tally_vote
+            VOTE: self.tally_vote,
+            APPEND: self.handle_entries
         }
 
         self.follower_handlers = {
             GET: self.redirect_request,
             PUT: self.redirect_request,
             REQ_VOTE: self.cast_vote,
-            VOTE: self.drop_message
+            VOTE: self.drop_message,
+            APPEND: self.handle_entries
         }
 
     def build_socket(self):
@@ -76,6 +81,9 @@ class KVStore(object):
         sock.connect(self.my_id)
 
         return sock
+
+    def reset_timeout(self):
+        self.timeout = time() + uniform(ELECT_TO_BOUNDS[0], ELECT_TO_BOUNDS[1])
 
     def run(self):
         """Run the key-value store."""
@@ -93,6 +101,7 @@ class KVStore(object):
         self.state = State.CANDIDATE
         self.leader = 'FFFF'
         self.votes = 1  # start by voting for yourself
+        self.reset_timeout()
 
         self.request_votes()
 
@@ -102,8 +111,6 @@ class KVStore(object):
             self.send_message(msg)
 
     def handle_message(self):
-        # TODO if message is from leader, reset timeout
-        # TODO if candidate, handle vote messages
         ready = select([self.sock], [], [], SELECT_TIMEOUT)[0]
 
         if ready:
@@ -123,9 +130,12 @@ class KVStore(object):
             elif self.state is State.CANDIDATE:
                 self.candidate_handlers[msg_t](msg)
             elif self.state is State.FOLLOWER:
+                if msg['src'] == self.leader:
+                    self.reset_timeout()
+
                 self.follower_handlers[msg_t](msg)
             else:
-                raise RuntimeError("Unknown state '{}'".format(self.state))
+                self.unknown_state()
 
     def handle_get(self, msg: dict):
         self.fail_request(msg)
@@ -153,6 +163,32 @@ class KVStore(object):
         self.leader = self.my_id
 
         print('{} is now leader'.format(self.my_id))
+        self.append_entries([])
+
+    def append_entries(self, entries: list):
+        for replica_id in self.replica_ids:
+            msg = self.build_base_message(replica_id, APPEND)
+            msg['entries'] = entries
+
+            self.send_message(msg)
+
+    def handle_entries(self, msg: dict):
+        if self.state == State.LEADER:
+            self.drop_message(msg)
+
+        elif self.state == State.CANDIDATE:
+            if msg['term'] >= self.term:
+                self.state = State.FOLLOWER
+                self.term = msg['term']
+                self.leader = msg['src']
+
+                self.handle_entries(msg)
+
+        elif self.state == State.FOLLOWER:
+            self.drop_message(msg)
+
+        else:
+            self.unknown_state()
 
     def cast_vote(self, req: dict):
         if self.voted_for is None:
@@ -174,6 +210,7 @@ class KVStore(object):
             'src': self.my_id,
             'dst': dst,
             'leader': self.leader,
+            'term': self.term,
             'type': msg_type
         }
 
@@ -187,9 +224,9 @@ class KVStore(object):
         print('{} dropping {} msg from {}'.format(
             self.my_id, msg['type'], msg['src']))
 
+    def unknown_state(self):
+        raise RuntimeError("Unknown state '{}'".format(self.state))
 
-def random_timeout():
-    return uniform(ELECT_TO_BOUNDS[0], ELECT_TO_BOUNDS[1])
 
 if __name__ == '__main__':
     KVStore(argv[1], argv[2:]).run()
