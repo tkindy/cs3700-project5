@@ -97,6 +97,8 @@ class KVStore(object):
             self.handle_message()
 
     def start_election(self):
+        print("{} initiating election".format(self.my_id))
+
         self.term += 1
         self.state = State.CANDIDATE
         self.leader = 'FFFF'
@@ -185,7 +187,12 @@ class KVStore(object):
                 self.handle_entries(msg)
 
         elif self.state == State.FOLLOWER:
-            self.drop_message(msg)
+            if msg['term'] >= self.term:
+                self.term = msg['term']
+
+                if msg['leader'] != self.leader:
+                    self.leader = msg['leader']
+                    print("{} recognizing {} as leader".format(self.my_id, self.leader))
 
         else:
             self.unknown_state()
