@@ -14,7 +14,7 @@ SELECT_TIMEOUT = 0.1
 # Maximum amount of data to receive from the socket, in bytes
 MAX_BYTES = 2 ** 15
 # Inclusive election timeout bounds (min, max), in seconds
-ELECT_TO_BOUNDS = (1, 2)
+ELECT_TO_BOUNDS = (0.25, 0.5)
 
 # Message type constants
 GET = 'get'
@@ -27,7 +27,7 @@ REDIRECT = 'redirect'
 
 # DERIVED CONSTANTS
 # Leader heartbeat interval, in seconds
-HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 10
+HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 2
 
 
 class State(Enum):
@@ -91,9 +91,7 @@ class KVStore(object):
 
     def reset_timeout(self):
         if self.state in [State.CANDIDATE, State.FOLLOWER]:
-            timeout_len = uniform(ELECT_TO_BOUNDS[0], ELECT_TO_BOUNDS[1])
-            print("{} will timeout in {} seconds".format(self.my_id, timeout_len))
-            self.timeout = time() + timeout_len
+            self.timeout = time() + uniform(ELECT_TO_BOUNDS[0], ELECT_TO_BOUNDS[1])
 
         elif self.state is State.LEADER:
             self.timeout = time() + HEARTBEAT_INTERVAL
@@ -104,7 +102,6 @@ class KVStore(object):
     def run(self):
         """Run the key-value store."""
         while True:
-            print("{}: {}".format(self.my_id, self.leader))
             if self.timeout - time() <= 0:
                 if self.state in [State.CANDIDATE, State.FOLLOWER]:
                     self.start_election()
@@ -118,8 +115,6 @@ class KVStore(object):
             self.handle_message()
 
     def start_election(self):
-        print("{} initiating election".format(self.my_id))
-
         self.term += 1
         self.state = State.CANDIDATE
         self.leader = 'FFFF'
@@ -195,8 +190,6 @@ class KVStore(object):
     def inaugurate(self):
         self.state = State.LEADER
         self.set_leader(self.my_id)
-
-        print('{} is now leader'.format(self.my_id))
         self.append_entries([])
 
     def append_entries(self, entries: list):
@@ -218,8 +211,6 @@ class KVStore(object):
                 self.term = msg['term']
                 self.set_leader(msg['src'])
 
-                print("{} recognizing {} as leader".format(self.my_id, self.leader))
-
                 self.handle_entries(msg)
 
         elif self.state is State.FOLLOWER:
@@ -228,7 +219,6 @@ class KVStore(object):
 
                 if msg['leader'] != self.leader:
                     self.set_leader(msg['leader'])
-                    print("{} recognizing {} as leader".format(self.my_id, self.leader))
 
         else:
             self.unknown_state()
