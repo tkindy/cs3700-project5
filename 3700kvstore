@@ -8,15 +8,13 @@ from socket import AF_UNIX, SOCK_SEQPACKET, socket
 from sys import argv
 from time import time
 
+# CONSTANTS
 # Timeout for the call to select, in seconds
 SELECT_TIMEOUT = 0.1
 # Maximum amount of data to receive from the socket, in bytes
 MAX_BYTES = 2 ** 15
 # Inclusive election timeout bounds (min, max), in seconds
 ELECT_TO_BOUNDS = (1, 2)
-# Leader heartbeat interval, in seconds. Should be less than the lower election timeout bound
-HEARTBEAT_INTERVAL = 0.5
-
 
 # Message type constants
 GET = 'get'
@@ -26,6 +24,10 @@ VOTE = 'vote'
 APPEND = 'append_entries'
 
 REDIRECT = 'redirect'
+
+# DERIVED CONSTANTS
+# Leader heartbeat interval, in seconds
+HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 10
 
 
 class State(Enum):
@@ -89,7 +91,9 @@ class KVStore(object):
 
     def reset_timeout(self):
         if self.state in [State.CANDIDATE, State.FOLLOWER]:
-            self.timeout = time() + uniform(ELECT_TO_BOUNDS[0], ELECT_TO_BOUNDS[1])
+            timeout_len = uniform(ELECT_TO_BOUNDS[0], ELECT_TO_BOUNDS[1])
+            print("{} will timeout in {} seconds".format(self.my_id, timeout_len))
+            self.timeout = time() + timeout_len
 
         elif self.state is State.LEADER:
             self.timeout = time() + HEARTBEAT_INTERVAL
@@ -100,7 +104,7 @@ class KVStore(object):
     def run(self):
         """Run the key-value store."""
         while True:
-            print(self.my_id)
+            print("{}: {}".format(self.my_id, self.leader))
             if self.timeout - time() <= 0:
                 if self.state in [State.CANDIDATE, State.FOLLOWER]:
                     self.start_election()
@@ -120,7 +124,6 @@ class KVStore(object):
         self.state = State.CANDIDATE
         self.leader = 'FFFF'
         self.votes = 1  # start by voting for yourself
-        self.reset_timeout()
 
         self.request_votes()
 
@@ -128,6 +131,8 @@ class KVStore(object):
         for replica_id in self.replica_ids:
             msg = self.build_base_message(replica_id, REQ_VOTE)
             self.send_message(msg)
+
+        self.reset_timeout()
 
     def handle_message(self):
         ready = select([self.sock], [], [], SELECT_TIMEOUT)[0]
@@ -184,12 +189,12 @@ class KVStore(object):
         if msg['vote'] == self.my_id:
             self.votes += 1
 
-        if self.votes >= (len(self.replica_ids) + 1) // 2:
+        if self.votes >= (len(self.replica_ids) + 1) // 2 + 1:
             self.inaugurate()
 
     def inaugurate(self):
         self.state = State.LEADER
-        self.leader = self.my_id
+        self.set_leader(self.my_id)
 
         print('{} is now leader'.format(self.my_id))
         self.append_entries([])
@@ -211,7 +216,7 @@ class KVStore(object):
             if msg['term'] >= self.term:
                 self.state = State.FOLLOWER
                 self.term = msg['term']
-                self.leader = msg['src']
+                self.set_leader(msg['src'])
 
                 print("{} recognizing {} as leader".format(self.my_id, self.leader))
 
@@ -222,11 +227,15 @@ class KVStore(object):
                 self.term = msg['term']
 
                 if msg['leader'] != self.leader:
-                    self.leader = msg['leader']
+                    self.set_leader(['leader'])
                     print("{} recognizing {} as leader".format(self.my_id, self.leader))
 
         else:
             self.unknown_state()
+
+    def set_leader(self, leader: str):
+        self.leader = leader
+        self.reset_timeout()
 
     def cast_vote(self, req: dict):
         if self.voted_for is None:
