@@ -1,14 +1,35 @@
 #!/usr/bin/python3
 
+from enum import Enum
 from json import dumps, loads
+from random import uniform
 from select import select
 from socket import AF_UNIX, SOCK_SEQPACKET, socket
 from sys import argv
+from time import time
 
 # Timeout for the call to select, in seconds
 SELECT_TIMEOUT = 0.1
 # Maximum amount of data to receive from the socket, in bytes
 MAX_BYTES = 2 ** 15
+# Inclusive election timeout bounds (min, max), in seconds
+ELECT_TO_BOUNDS = (0.15, 0.3)
+
+# Message type constants
+GET = 'get'
+PUT = 'put'
+REQ_VOTE = 'request_vote'
+VOTE = 'vote'
+
+REDIRECT = 'redirect'
+
+
+class State(Enum):
+
+    """Server states"""
+    FOLLOWER = 1
+    CANDIDATE = 2
+    LEADER = 3
 
 
 class KVStore(object):
@@ -20,7 +41,34 @@ class KVStore(object):
         self.replica_ids = replica_ids
 
         self.sock = self.build_socket()
+        self.state = State.FOLLOWER
         self.leader = 'FFFF'
+        self.timeout = 0
+        self.term = 0
+
+        self.voted_for = None
+        self.votes = 0
+
+        self.leader_handlers = {
+            GET: self.handle_get,
+            PUT: self.handle_put,
+            REQ_VOTE: self.drop_message,
+            VOTE: self.drop_message
+        }
+
+        self.candidate_handlers = {  # TODO drop out of election if higher term number received on an append call
+            GET: self.drop_message,  # TODO should queue request until new leader is decided
+            PUT: self.drop_message,  # TODO should queue request until new leader is decided
+            REQ_VOTE: self.drop_message,
+            VOTE: self.tally_vote
+        }
+
+        self.follower_handlers = {
+            GET: self.redirect_request,
+            PUT: self.redirect_request,
+            REQ_VOTE: self.cast_vote,
+            VOTE: self.drop_message
+        }
 
     def build_socket(self):
         """Build the UNIX domain socket."""
@@ -32,9 +80,30 @@ class KVStore(object):
     def run(self):
         """Run the key-value store."""
         while True:
+            if self.timeout - time() <= 0:
+                if self.state in [State.CANDIDATE, State.FOLLOWER]:
+                    self.start_election()
+                else:  # TODO leader timeout
+                    pass
+
             self.handle_message()
 
+    def start_election(self):
+        self.term += 1
+        self.state = State.CANDIDATE
+        self.leader = 'FFFF'
+        self.votes = 1  # start by voting for yourself
+
+        self.request_votes()
+
+    def request_votes(self):
+        for replica_id in self.replica_ids:
+            msg = self.build_base_message(replica_id, REQ_VOTE)
+            self.send_message(msg)
+
     def handle_message(self):
+        # TODO if message is from leader, reset timeout
+        # TODO if candidate, handle vote messages
         ready = select([self.sock], [], [], SELECT_TIMEOUT)[0]
 
         if ready:
@@ -44,11 +113,19 @@ class KVStore(object):
                 return
 
             msg = loads(msg_raw.decode('utf-8'))
+            msg_t = msg['type']
 
-            {
-                'get': self.handle_get,
-                'put': self.handle_put
-            }[msg['type']](msg)
+            print('{} received {} msg from {}'.format(
+                self.my_id, msg_t, msg['src']))
+
+            if self.state is State.LEADER:
+                self.leader_handlers[msg_t](msg)
+            elif self.state is State.CANDIDATE:
+                self.candidate_handlers[msg_t](msg)
+            elif self.state is State.FOLLOWER:
+                self.follower_handlers[msg_t](msg)
+            else:
+                raise RuntimeError("Unknown state '{}'".format(self.state))
 
     def handle_get(self, msg: dict):
         self.fail_request(msg)
@@ -56,20 +133,63 @@ class KVStore(object):
     def handle_put(self, msg: dict):
         self.fail_request(msg)
 
-    def fail_request(self, msg: dict):
-        msg = {
-            'src': self.my_id,
-            'dst': msg['src'],
-            'leader': self.leader,
-            'type': 'fail',
-            'MID': msg['MID']
-        }
+    def fail_request(self, req: dict):
+        msg = self.build_base_response(req, 'fail')
         self.send_message(msg)
+
+    def redirect_request(self, req: dict):
+        msg = self.build_base_response(req, REDIRECT)
+        self.send_message(msg)
+
+    def tally_vote(self, msg: dict):
+        if msg['vote'] == self.my_id:
+            self.votes += 1
+
+        if self.votes >= (len(self.replica_ids) + 1) // 2:
+            self.inaugurate()
+
+    def inaugurate(self):
+        self.state = State.LEADER
+        self.leader = self.my_id
+
+        print('{} is now leader'.format(self.my_id))
+
+    def cast_vote(self, req: dict):
+        if self.voted_for is None:
+            self.voted_for = req['src']
+
+        msg = self.build_base_message(req['src'], VOTE)
+        msg['vote'] = self.voted_for
+
+        self.send_message(msg)
+
+    def build_base_response(self, req: dict, msg_type: str) -> dict:
+        resp = self.build_base_message(req['src'], msg_type)
+        resp['MID'] = req['MID']
+
+        return resp
+
+    def build_base_message(self, dst: str, msg_type: str) -> dict:
+        return {
+            'src': self.my_id,
+            'dst': dst,
+            'leader': self.leader,
+            'type': msg_type
+        }
 
     def send_message(self, msg: dict):
         """Send the message as JSON."""
+        print('{} sending {} msg to {}'.format(
+            msg['src'], msg['type'], msg['dst']))
         self.sock.send(dumps(msg).encode('utf-8'))
 
+    def drop_message(self, msg: dict):
+        print('{} dropping {} msg from {}'.format(
+            self.my_id, msg['type'], msg['src']))
+
+
+def random_timeout():
+    return uniform(ELECT_TO_BOUNDS[0], ELECT_TO_BOUNDS[1])
 
 if __name__ == '__main__':
     KVStore(argv[1], argv[2:]).run()
