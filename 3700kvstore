@@ -46,7 +46,7 @@ class KVStore(object):
             if not msg_raw:
                 return
 
-            msg = loads(msg_raw)
+            msg = loads(msg_raw.decode('utf-8'))
 
             if msg['type'] == 'get':
                 self.handle_get(msg)
@@ -69,7 +69,7 @@ class KVStore(object):
             # You definitely want to remove this from your implementation
             msg = {'src': self.my_id, 'dst': choice(
                 self.replica_ids), 'leader': 'FFFF', 'type': 'noop'}
-            self.sock.send(dumps(msg))
+            self.sock.send(dumps(msg).encode('utf-8'))
             print('%s sending a NOOP to %s' % (msg['src'], msg['dst']))
             self.last_send = clock
 
