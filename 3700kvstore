@@ -29,6 +29,15 @@ REDIRECT = 'redirect'
 # Leader heartbeat interval, in seconds
 HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 4
 
+# for debugging
+DEBUG = False
+
+
+# print if debug is on
+def debug(data: str):
+    if DEBUG:
+        print(data)
+
 
 class State(Enum):
 
@@ -141,7 +150,7 @@ class KVStore(object):
             msg = loads(msg_raw.decode('utf-8'))
             msg_t = msg['type']
 
-            print('{} received {} msg from {}'.format(
+            debug('{} received {} msg from {}'.format(
                 self.my_id, msg_t, msg['src']))
 
             if self.state is State.LEADER:
@@ -246,12 +255,12 @@ class KVStore(object):
 
     def send_message(self, msg: dict):
         """Send the message as JSON."""
-        print('{} sending {} msg to {}'.format(
+        debug('{} sending {} msg to {}'.format(
             msg['src'], msg['type'], msg['dst']))
         self.sock.send(dumps(msg).encode('utf-8'))
 
     def drop_message(self, msg: dict):
-        print('{} dropping {} msg from {}'.format(
+        debug('{} dropping {} msg from {}'.format(
             self.my_id, msg['type'], msg['src']))
 
     def unknown_state(self):
@@ -259,4 +268,5 @@ class KVStore(object):
 
 
 if __name__ == '__main__':
+    # run the store
     KVStore(argv[1], argv[2:]).run()
