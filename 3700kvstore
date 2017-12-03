@@ -2,6 +2,7 @@
 
 from enum import Enum
 from json import dumps, loads
+from queue import Queue
 from random import uniform
 from select import select
 from socket import AF_UNIX, SOCK_SEQPACKET, socket
@@ -22,7 +23,6 @@ PUT = 'put'
 REQ_VOTE = 'request_vote'
 VOTE = 'vote'
 APPEND = 'append_entries'
-
 REDIRECT = 'redirect'
 
 # DERIVED CONSTANTS
@@ -40,15 +40,25 @@ def debug(data: str):
 
 
 class State(Enum):
-
     """Server states"""
+
     FOLLOWER = 1
     CANDIDATE = 2
     LEADER = 3
 
 
-class KVStore(object):
+class Operation(object):
+    """All replicas queue pending operations as a log."""
 
+    def __init__(self, op: callable(dict), data: dict):
+        self.operation = op
+        self.entry = data
+
+    def apply(self):
+        self.operation(self.entry)
+
+
+class KVStore(object):
     """The key-value store program."""
 
     def __init__(self, my_id: str, replica_ids: list):
@@ -56,11 +66,13 @@ class KVStore(object):
         self.replica_ids = replica_ids
 
         self.data = {}
+        self.message_queue = Queue()
 
         self.sock = self.build_socket()
         self.state = State.FOLLOWER
         self.leader = 'FFFF'
         self.term = 0
+        self.in_election = False
 
         self.reset_timeout()
 
@@ -76,8 +88,8 @@ class KVStore(object):
         }
 
         self.candidate_handlers = {
-            GET: self.drop_message,  # TODO should queue request until new leader is decided
-            PUT: self.drop_message,  # TODO should queue request until new leader is decided
+            GET: self.message_queue.put,
+            PUT: self.message_queue.put,
             REQ_VOTE: self.drop_message,
             VOTE: self.tally_vote,
             APPEND: self.maybe_drop_out
@@ -93,6 +105,7 @@ class KVStore(object):
 
     def build_socket(self):
         """Build the UNIX domain socket."""
+
         sock = socket(AF_UNIX, SOCK_SEQPACKET)
         sock.connect(self.my_id)
 
@@ -110,6 +123,7 @@ class KVStore(object):
 
     def run(self):
         """Run the key-value store."""
+
         while True:
             if self.timeout - time() <= 0:
                 if self.state in [State.CANDIDATE, State.FOLLOWER]:
@@ -130,6 +144,7 @@ class KVStore(object):
         self.votes = 1  # start by voting for yourself
 
         self.request_votes()
+        self.in_election = True
 
     def request_votes(self):
         for replica_id in self.replica_ids:
@@ -153,8 +168,20 @@ class KVStore(object):
             debug('{} received {} msg from {}'.format(
                 self.my_id, msg_t, msg['src']))
 
+            # TODO: add the rest of Raft here
+
             if self.state is State.LEADER:
-                self.leader_handlers[msg_t](msg)
+                # determine if the message should be queued or processed immediately
+                if self.in_election:
+                    self.message_queue.put(msg)
+                    return  # don't process messages during elections
+                # if there are messages to be processed,
+                # act on them first and store new ones for later
+                if not self.message_queue.empty():
+                    msg_to_process = self.message_queue.get()
+                else:
+                    msg_to_process = msg
+                self.leader_handlers[msg_t](msg_to_process)
             elif self.state is State.CANDIDATE:
                 self.candidate_handlers[msg_t](msg)
             elif self.state is State.FOLLOWER:
@@ -195,6 +222,8 @@ class KVStore(object):
 
         if self.votes >= (len(self.replica_ids) + 1) // 2 + 1:
             self.inaugurate()
+
+        self.in_election = False
 
     def inaugurate(self):
         self.state = State.LEADER
