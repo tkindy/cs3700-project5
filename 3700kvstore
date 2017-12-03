@@ -14,7 +14,7 @@ SELECT_TIMEOUT = 0.1
 # Maximum amount of data to receive from the socket, in bytes
 MAX_BYTES = 2 ** 15
 # Inclusive election timeout bounds (min, max), in seconds
-ELECT_TO_BOUNDS = (0.25, 0.5)
+ELECT_TO_BOUNDS = (0.5, 1)
 
 # Message type constants
 GET = 'get'
@@ -27,7 +27,7 @@ REDIRECT = 'redirect'
 
 # DERIVED CONSTANTS
 # Leader heartbeat interval, in seconds
-HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 4
+HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 10
 
 # for debugging
 DEBUG = False
@@ -65,7 +65,7 @@ class KVStore(object):
         self.timeout = None
         self.reset_timeout()
 
-        self.voted_for = None
+        self.voted_for = {}
         self.votes = 0
 
         self.leader_handlers = {
@@ -130,6 +130,8 @@ class KVStore(object):
         self.leader = 'FFFF'
         self.votes = 1  # start by voting for yourself
 
+        debug('{} started an election for term {}'.format(self.my_id, self.term))
+
         self.request_votes()
 
     def request_votes(self):
@@ -151,8 +153,7 @@ class KVStore(object):
             msg = loads(msg_raw.decode('utf-8'))
             msg_t = msg['type']
 
-            debug('{} received {} msg from {}'.format(
-                self.my_id, msg_t, msg['src']))
+            # debug('{} received {} msg from {}'.format(self.my_id, msg_t, msg['src']))
 
             if self.state is State.LEADER:
                 self.leader_handlers[msg_t](msg)
@@ -202,6 +203,8 @@ class KVStore(object):
         self.set_leader(self.my_id)
         self.append_entries([])
 
+        debug('{} has been selected for term {}'.format(self.my_id, self.term))
+
     def append_entries(self, entries: list):
         self.reset_timeout()
 
@@ -213,6 +216,7 @@ class KVStore(object):
 
     def maybe_drop_out(self, msg: dict):
         if msg['term'] >= self.term:
+            debug('{} dropping out for term {}'.format(self.my_id, self.term))
             self.state = State.FOLLOWER
             self.term = msg['term']
             self.set_leader(msg['src'])
@@ -227,17 +231,31 @@ class KVStore(object):
                 self.set_leader(msg['leader'])
 
     def set_leader(self, leader: str):
+        debug('{} recognizes {} as leader for term {}'.format(self.my_id, leader, self.term))
         self.leader = leader
+
+        if self.leader != self.my_id:
+            self.state = State.FOLLOWER
+        else:
+            self.state = State.LEADER
+
         self.reset_timeout()
 
     def cast_vote(self, req: dict):
-        if self.voted_for is None:
-            self.voted_for = req['src']
+        if req['term'] in self.voted_for:
+            return
 
+        # TODO only vote for replicas with all log entries
+
+        candidate = req['src']
+        self.voted_for[req['term']] = candidate
         msg = self.build_base_message(req['src'], VOTE)
-        msg['vote'] = self.voted_for
+        msg['vote'] = candidate
+
+        debug('{} casting vote for {} for term {}'.format(self.my_id, self.voted_for[req['term']], req['term']))
 
         self.send_message(msg)
+        self.reset_timeout()
 
     def build_base_response(self, req: dict, msg_type: str) -> dict:
         resp = self.build_base_message(req['src'], msg_type)
@@ -256,13 +274,12 @@ class KVStore(object):
 
     def send_message(self, msg: dict):
         """Send the message as JSON."""
-        debug('{} sending {} msg to {}'.format(
-            msg['src'], msg['type'], msg['dst']))
+        # debug('{} sending {} msg to {}'.format(msg['src'], msg['type'], msg['dst']))
         self.sock.send(dumps(msg).encode('utf-8'))
 
     def drop_message(self, msg: dict):
-        debug('{} dropping {} msg from {}'.format(
-            self.my_id, msg['type'], msg['src']))
+        # debug('{} dropping {} msg from {}'.format(self.my_id, msg['type'], msg['src']))
+        pass
 
     def unknown_state(self):
         raise RuntimeError("Unknown state '{}'".format(self.state))
