@@ -14,7 +14,7 @@ SELECT_TIMEOUT = 0.1
 # Maximum amount of data to receive from the socket, in bytes
 MAX_BYTES = 2 ** 15
 # Inclusive election timeout bounds (min, max), in seconds
-ELECT_TO_BOUNDS = (0.5, 1)
+ELECT_TO_BOUNDS = (0.25, 0.5)
 
 # Message type constants
 GET = 'get'
@@ -30,7 +30,7 @@ REDIRECT = 'redirect'
 HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 10
 
 # for debugging
-DEBUG = False
+DEBUG = True
 
 
 # print if debug is on
@@ -154,6 +154,9 @@ class KVStore(object):
             msg_t = msg['type']
 
             # debug('{} received {} msg from {}'.format(self.my_id, msg_t, msg['src']))
+
+            if 'term' in msg and msg['term'] > self.term:
+                self.update_term(msg)
 
             if self.state is State.LEADER:
                 self.leader_handlers[msg_t](msg)
