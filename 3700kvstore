@@ -252,7 +252,8 @@ class KVStore(object):
 
             last_idx = next_idx - 1
             msg['last_index'] = last_idx
-            debug('<{}> last entry: {}'.format(self.my_id, self.log[last_idx]))
+            if last_idx >= 0:
+                debug('<{}> last entry: {}'.format(self.my_id, self.log[last_idx]))
             msg['last_term'] = self.log[last_idx]['term'] if last_idx >= 0 else -1
 
             self.send_message(msg)
