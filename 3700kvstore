@@ -35,6 +35,7 @@ HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 10
 DEBUG = True
 TXRX_DEBUG = False
 APPEND_DEBUG = False
+CLIENT_DEBUG = True
 
 
 # print if debug is on
@@ -49,6 +50,10 @@ def txrx_debug(data: str):
 
 def append_debug(data: str):
     if APPEND_DEBUG:
+        debug(data)
+
+def client_debug(data: str):
+    if CLIENT_DEBUG:
         debug(data)
 
 
@@ -307,6 +312,7 @@ class KVStore(object):
         finish_puts = [(idx, req) for idx, req in self.outstanding_puts.items() if idx <= self.committed_index]
 
         for idx, req in finish_puts:
+            client_debug('<{}> put ID {} committed'.format(self.my_id, req['MID']))
             resp = self.build_base_response(req, OK)
             self.send_message(resp)
 
