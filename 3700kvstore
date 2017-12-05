@@ -31,6 +31,7 @@ HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 10
 
 # for debugging
 DEBUG = True
+TXRX_DEBUG = False
 
 
 # print if debug is on
@@ -39,8 +40,12 @@ def debug(data: str):
         print(data)
 
 
-class State(Enum):
+def txrx_debug(data: str):
+    if TXRX_DEBUG:
+        debug(data)
 
+
+class State(Enum):
     """Server states"""
     FOLLOWER = 1
     CANDIDATE = 2
@@ -48,7 +53,6 @@ class State(Enum):
 
 
 class KVStore(object):
-
     """The key-value store program."""
 
     def __init__(self, my_id: str, replica_ids: list):
@@ -153,7 +157,7 @@ class KVStore(object):
             msg = loads(msg_raw.decode('utf-8'))
             msg_t = msg['type']
 
-            # debug('{} received {} msg from {}'.format(self.my_id, msg_t, msg['src']))
+            txrx_debug('{} received {} msg from {}'.format(self.my_id, msg_t, msg['src']))
 
             if 'term' in msg and msg['term'] > self.term:
                 self.update_term(msg)
@@ -246,6 +250,7 @@ class KVStore(object):
 
     def cast_vote(self, req: dict):
         if req['term'] in self.voted_for:
+            debug('{} already voted for term {}'.format(self.my_id, req['term']))
             return
 
         # TODO only vote for replicas with all log entries
@@ -277,11 +282,11 @@ class KVStore(object):
 
     def send_message(self, msg: dict):
         """Send the message as JSON."""
-        # debug('{} sending {} msg to {}'.format(msg['src'], msg['type'], msg['dst']))
+        txrx_debug('{} sending {} msg to {}'.format(msg['src'], msg['type'], msg['dst']))
         self.sock.send(dumps(msg).encode('utf-8'))
 
     def drop_message(self, msg: dict):
-        # debug('{} dropping {} msg from {}'.format(self.my_id, msg['type'], msg['src']))
+        txrx_debug('{} dropping {} msg from {}'.format(self.my_id, msg['type'], msg['src']))
         pass
 
     def unknown_state(self):
