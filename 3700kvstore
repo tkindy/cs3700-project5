@@ -244,6 +244,7 @@ class KVStore(object):
             msg['committed'] = self.committed_index
             next_idx = self.next_indices[replica_id]
 
+            debug('<{}> log: {}'.format(self.my_id, len(self.log)))
             debug('<{}> next: {}'.format(replica_id, next_idx))
 
             msg['next_index'] = next_idx
