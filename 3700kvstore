@@ -278,7 +278,7 @@ class KVStore(object):
 
     def append_and_ack(self, new_entries: list):
         debug('<{}> append {}'.format(self.my_id, new_entries))
-        self.log.append(new_entries)
+        self.log += new_entries
 
         resp = self.build_base_message(self.leader, OK)
         resp['next_index'] = len(self.log)
