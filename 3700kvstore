@@ -22,6 +22,8 @@ PUT = 'put'
 REQ_VOTE = 'request_vote'
 VOTE = 'vote'
 APPEND = 'append_entries'
+OK = 'ok'
+FAIL = 'fail'
 
 REDIRECT = 'redirect'
 
@@ -58,6 +60,10 @@ class KVStore(object):
     def __init__(self, my_id: str, replica_ids: list):
         self.my_id = my_id
         self.replica_ids = replica_ids
+        self.majority = (len(self.replica_ids) + 1) // 2 + 1
+
+        self.next_indices = {replica_id: 0 for replica_id in replica_ids}
+        self.committed_index = -1
 
         self.data = {}
 
@@ -65,6 +71,8 @@ class KVStore(object):
         self.state = State.FOLLOWER
         self.leader = 'FFFF'
         self.term = 0
+
+        self.log = []
 
         self.timeout = None
         self.reset_timeout()
@@ -77,7 +85,9 @@ class KVStore(object):
             PUT: self.handle_put,
             REQ_VOTE: self.drop_message,
             VOTE: self.drop_message,
-            APPEND: self.drop_message
+            APPEND: self.update_term,
+            OK: self.handle_ok,
+            FAIL: self.handle_fail
         }
 
         self.candidate_handlers = {
@@ -93,7 +103,7 @@ class KVStore(object):
             PUT: self.redirect_request,
             REQ_VOTE: self.cast_vote,
             VOTE: self.drop_message,
-            APPEND: self.update_term
+            APPEND: self.append_entries
         }
 
     def build_socket(self):
@@ -121,7 +131,8 @@ class KVStore(object):
                     self.start_election()
 
                 elif self.state is State.LEADER:
-                    self.append_entries([])
+                    self.send_appends()
+                    self.commit_entries()
 
                 else:
                     self.unknown_state()
@@ -176,7 +187,7 @@ class KVStore(object):
 
     def handle_get(self, req: dict):
         if req['key'] in self.data:
-            msg = self.build_base_response(req, 'ok')
+            msg = self.build_base_response(req, OK)
             msg['value'] = self.data[req['key']]
 
             self.send_message(msg)
@@ -185,13 +196,20 @@ class KVStore(object):
             self.fail_request(req)
 
     def handle_put(self, req: dict):
-        self.data[req['key']] = req['value']
+        entry = {
+            'index': len(self.log),
+            'term': self.term,
+            'key': req['key'],
+            'value': req['value']
+        }
 
-        msg = self.build_base_response(req, 'ok')
+        self.log.append(entry)
+
+        msg = self.build_base_response(req, OK)
         self.send_message(msg)
 
     def fail_request(self, req: dict):
-        msg = self.build_base_response(req, 'fail')
+        msg = self.build_base_response(req, FAIL)
         self.send_message(msg)
 
     def redirect_request(self, req: dict):
@@ -202,24 +220,76 @@ class KVStore(object):
         if msg['vote'] == self.my_id:
             self.votes += 1
 
-        if self.votes >= (len(self.replica_ids) + 1) // 2 + 1:
+        if self.votes >= self.majority:
             self.inaugurate()
 
     def inaugurate(self):
         self.state = State.LEADER
         self.set_leader(self.my_id)
-        self.append_entries([])
-
         debug('{} has been selected for term {}'.format(self.my_id, self.term))
 
-    def append_entries(self, entries: list):
+        self.next_indices = {replica_id: len(self.log) for replica_id in self.replica_ids}
+        self.send_appends()
+
+    def send_appends(self):
         self.reset_timeout()
 
         for replica_id in self.replica_ids:
             msg = self.build_base_message(replica_id, APPEND)
-            msg['entries'] = entries
+            msg['committed'] = self.committed_index
+            next_idx = self.next_indices[replica_id]
+            msg['next_index'] = next_idx
+            msg['entries'] = self.log[next_idx:]
+
+            last_idx = next_idx - 1
+            msg['last_index'] = last_idx
+            msg['last_term'] = self.log[last_idx]['term']
 
             self.send_message(msg)
+
+    def append_entries(self, msg: dict):
+        self.apply_commit(msg['committed'])
+
+        if not msg['next_index']:
+            self.log = []
+            self.append_and_ack(msg['entries'])
+            return
+
+        last_idx = msg['last_index']
+        last_entry = self.log[last_idx]
+
+        if last_entry['term'] == msg['last_term']:
+            self.log = self.log[:last_idx + 1]
+            self.append_and_ack(msg['entries'])
+        else:
+            resp = self.build_base_message(msg['src'], FAIL)
+            self.send_message(resp)
+
+    def append_and_ack(self, new_entries: list):
+        self.log.append(new_entries)
+
+        resp = self.build_base_message(self.leader, OK)
+        resp['next_index'] = len(self.log)
+        self.send_message(resp)
+
+    def handle_ok(self, msg: dict):
+        self.next_indices[msg['src']] = msg['next_index']
+
+    def handle_fail(self, msg: dict):
+        self.next_indices[msg['src']] -= 1
+
+    def commit_entries(self):
+        nexts = list(self.next_indices.values())
+        nexts.sort(reverse=True)
+
+        new_committed = nexts[self.majority - 1] - 1
+        self.apply_commit(new_committed)
+
+    def apply_commit(self, new_committed: int):
+        for entry in self.log[self.committed_index + 1:new_committed + 1]:
+            self.data[entry['key']] = entry['value']
+
+        self.committed_index = new_committed
 
     def maybe_drop_out(self, msg: dict):
         if msg['term'] >= self.term:
@@ -241,10 +311,10 @@ class KVStore(object):
         debug('{} recognizes {} as leader for term {}'.format(self.my_id, leader, self.term))
         self.leader = leader
 
-        if self.leader != self.my_id:
-            self.state = State.FOLLOWER
-        else:
+        if self.leader == self.my_id:
             self.state = State.LEADER
+        else:
+            self.state = State.FOLLOWER
 
         self.reset_timeout()
 
