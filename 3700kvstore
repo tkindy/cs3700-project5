@@ -304,7 +304,7 @@ class KVStore(object):
         new_committed = nexts[self.majority - 1] - 1
         self.apply_commit(new_committed)
 
-        finish_puts = [(idx, req) for idx, req in self.outstanding_puts.values() if idx <= self.committed_index]
+        finish_puts = [(idx, req) for idx, req in self.outstanding_puts.items() if idx <= self.committed_index]
 
         for idx, req in finish_puts:
             resp = self.build_base_response(req, OK)
