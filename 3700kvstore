@@ -73,6 +73,7 @@ class KVStore(object):
         self.term = 0
 
         self.log = []
+        self.outstanding_puts = {}
 
         self.timeout = None
         self.reset_timeout()
@@ -95,7 +96,9 @@ class KVStore(object):
             PUT: self.drop_message,
             REQ_VOTE: self.drop_message,
             VOTE: self.tally_vote,
-            APPEND: self.maybe_drop_out
+            APPEND: self.maybe_drop_out,
+            OK: self.drop_message,
+            FAIL: self.drop_message
         }
 
         self.follower_handlers = {
@@ -103,7 +106,9 @@ class KVStore(object):
             PUT: self.redirect_request,
             REQ_VOTE: self.cast_vote,
             VOTE: self.drop_message,
-            APPEND: self.append_entries
+            APPEND: self.append_entries,
+            OK: self.drop_message,
+            FAIL: self.drop_message
         }
 
     def build_socket(self):
@@ -196,17 +201,16 @@ class KVStore(object):
             self.fail_request(req)
 
     def handle_put(self, req: dict):
+        new_idx = len(self.log)
         entry = {
-            'index': len(self.log),
+            'index': new_idx,
             'term': self.term,
             'key': req['key'],
             'value': req['value']
         }
 
         self.log.append(entry)
-
-        msg = self.build_base_response(req, OK)
-        self.send_message(msg)
+        self.outstanding_puts[new_idx] = req
 
     def fail_request(self, req: dict):
         msg = self.build_base_response(req, FAIL)
@@ -228,6 +232,7 @@ class KVStore(object):
         self.set_leader(self.my_id)
         debug('{} has been selected for term {}'.format(self.my_id, self.term))
 
+        self.outstanding_puts = {}
         self.next_indices = {replica_id: len(self.log) for replica_id in self.replica_ids}
         self.send_appends()
 
@@ -284,6 +289,14 @@ class KVStore(object):
 
         new_committed = nexts[self.majority - 1] - 1
         self.apply_commit(new_committed)
+
+        finish_puts = [(idx, req) for idx, req in self.outstanding_puts.values() if idx <= self.committed_index]
+
+        for idx, req in finish_puts:
+            resp = self.build_base_response(req, OK)
+            self.send_message(resp)
+
+            del self.outstanding_puts[idx]
 
     def apply_commit(self, new_committed: int):
         for entry in self.log[self.committed_index + 1:new_committed + 1]:
