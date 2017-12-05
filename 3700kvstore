@@ -234,6 +234,8 @@ class KVStore(object):
             self.fail_request(req)
 
     def handle_put(self, req: dict):
+        debug("<{}> {} => {}".format(self.my_id, req['key'], req['value']))
+
         new_idx = len(self.log)
         entry = {
             'index': new_idx,
