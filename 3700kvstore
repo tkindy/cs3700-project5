@@ -33,7 +33,7 @@ HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 10
 
 # for debugging
 DEBUG = True
-TXRX_DEBUG = False
+TXRX_DEBUG = True
 
 
 # print if debug is on
@@ -277,6 +277,7 @@ class KVStore(object):
             self.send_message(resp)
 
     def append_and_ack(self, new_entries: list):
+        debug('<{}> append {}'.format(self.my_id, new_entries))
         self.log.append(new_entries)
 
         resp = self.build_base_message(self.leader, OK)
