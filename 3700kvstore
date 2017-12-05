@@ -41,9 +41,9 @@ DUMMY_ENTRY = {
 # for debugging
 DEBUG = True
 TXRX_DEBUG = False
-ELECTION_DEBUG = False
+ELECTION_DEBUG = True
 APPEND_DEBUG = False
-CLIENT_DEBUG = True
+CLIENT_DEBUG = False
 
 
 # print if debug is on
