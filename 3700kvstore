@@ -44,6 +44,7 @@ TXRX_DEBUG = False
 ELECTION_DEBUG = True
 APPEND_DEBUG = False
 CLIENT_DEBUG = False
+REDIRECT_DEBUG = True
 
 
 # print if debug is on
@@ -69,6 +70,11 @@ def append_debug(data: str):
 
 def client_debug(data: str):
     if CLIENT_DEBUG:
+        debug(data)
+
+
+def redirect_debug(data: str):
+    if REDIRECT_DEBUG:
         debug(data)
 
 
@@ -234,8 +240,6 @@ class KVStore(object):
             self.fail_request(req)
 
     def handle_put(self, req: dict):
-        debug("<{}> {} => {}".format(self.my_id, req['key'], req['value']))
-
         new_idx = len(self.log)
         entry = {
             'index': new_idx,
@@ -252,6 +256,7 @@ class KVStore(object):
         self.send_message(msg)
 
     def redirect_request(self, req: dict):
+        redirect_debug("<{}> redirecting to {}".format(self.my_id, self.leader))
         msg = self.build_base_response(req, REDIRECT)
         self.send_message(msg)
 
