@@ -31,9 +31,17 @@ REDIRECT = 'redirect'
 # Leader heartbeat interval, in seconds
 HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 10
 
+DUMMY_ENTRY = {
+    'index': -1,
+    'term': -1,
+    'key': '',
+    'value': ''
+}
+
 # for debugging
 DEBUG = True
 TXRX_DEBUG = False
+ELECTION_DEBUG = False
 APPEND_DEBUG = False
 CLIENT_DEBUG = True
 
@@ -48,9 +56,16 @@ def txrx_debug(data: str):
     if TXRX_DEBUG:
         debug(data)
 
+
+def election_debug(data: str):
+    if ELECTION_DEBUG:
+        debug(data)
+
+
 def append_debug(data: str):
     if APPEND_DEBUG:
         debug(data)
+
 
 def client_debug(data: str):
     if CLIENT_DEBUG:
@@ -160,16 +175,24 @@ class KVStore(object):
         self.leader = 'FFFF'
         self.votes = 1  # start by voting for yourself
 
-        debug('{} started an election for term {}'.format(self.my_id, self.term))
+        election_debug('{} started an election for term {}'.format(self.my_id, self.term))
 
         self.request_votes()
 
     def request_votes(self):
         for replica_id in self.replica_ids:
             msg = self.build_base_message(replica_id, REQ_VOTE)
+
+            last_entry = self.last_entry()
+            msg['last_term'] = last_entry['term']
+            msg['last_index'] = last_entry['index']
+
             self.send_message(msg)
 
         self.reset_timeout()
+
+    def last_entry(self):
+        return self.log[-1] if self.log else DUMMY_ENTRY
 
     def handle_message(self):
         ready = select([self.sock], [], [], SELECT_TIMEOUT)[0]
@@ -240,7 +263,7 @@ class KVStore(object):
     def inaugurate(self):
         self.state = State.LEADER
         self.set_leader(self.my_id)
-        debug('{} has been selected for term {}'.format(self.my_id, self.term))
+        election_debug('{} has been selected for term {}'.format(self.my_id, self.term))
 
         self.outstanding_puts = {}
         self.next_indices = {replica_id: len(self.log) for replica_id in self.replica_ids}
@@ -326,7 +349,7 @@ class KVStore(object):
 
     def maybe_drop_out(self, msg: dict):
         if msg['term'] >= self.term:
-            debug('{} dropping out for term {}'.format(self.my_id, self.term))
+            election_debug('{} dropping out for term {}'.format(self.my_id, self.term))
             self.state = State.FOLLOWER
             self.term = msg['term']
             self.set_leader(msg['src'])
@@ -341,7 +364,7 @@ class KVStore(object):
                 self.set_leader(msg['leader'])
 
     def set_leader(self, leader: str):
-        debug('{} recognizes {} as leader for term {}'.format(self.my_id, leader, self.term))
+        election_debug('{} recognizes {} as leader for term {}'.format(self.my_id, leader, self.term))
         self.leader = leader
 
         if self.leader == self.my_id:
@@ -353,17 +376,22 @@ class KVStore(object):
 
     def cast_vote(self, req: dict):
         if req['term'] in self.voted_for:
-            debug('{} already voted for term {}'.format(self.my_id, req['term']))
+            election_debug('{} already voted for term {}'.format(self.my_id, req['term']))
             return
 
-        # TODO only vote for replicas with all log entries
+        last_entry = self.last_entry()
+        if req['last_term'] < last_entry['term'] or \
+                (req['last_term'] == last_entry and req['last_index'] < last_entry['index']):
+            election_debug('{} not voting for {}; log not up-to-date'.format(self.my_id, req['src']))
+            return
 
         candidate = req['src']
         self.voted_for[req['term']] = candidate
         msg = self.build_base_message(req['src'], VOTE)
         msg['vote'] = candidate
 
-        debug('{} casting vote for {} for term {}'.format(self.my_id, self.voted_for[req['term']], req['term']))
+        election_debug(
+            '{} casting vote for {} for term {}'.format(self.my_id, self.voted_for[req['term']], req['term']))
 
         self.send_message(msg)
         self.reset_timeout()
