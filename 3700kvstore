@@ -33,7 +33,8 @@ HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 10
 
 # for debugging
 DEBUG = True
-TXRX_DEBUG = True
+TXRX_DEBUG = False
+APPEND_DEBUG = False
 
 
 # print if debug is on
@@ -44,6 +45,10 @@ def debug(data: str):
 
 def txrx_debug(data: str):
     if TXRX_DEBUG:
+        debug(data)
+
+def append_debug(data: str):
+    if APPEND_DEBUG:
         debug(data)
 
 
@@ -244,16 +249,18 @@ class KVStore(object):
             msg['committed'] = self.committed_index
             next_idx = self.next_indices[replica_id]
 
-            debug('<{}> log: {}'.format(self.my_id, len(self.log)))
-            debug('<{}> next: {}'.format(replica_id, next_idx))
+            append_debug('<{}> log: {}'.format(self.my_id, len(self.log)))
+            append_debug('<{}> next: {}'.format(replica_id, next_idx))
 
             msg['next_index'] = next_idx
             msg['entries'] = self.log[next_idx:]
 
             last_idx = next_idx - 1
             msg['last_index'] = last_idx
+
             if last_idx >= 0:
-                debug('<{}> last entry: {}'.format(self.my_id, self.log[last_idx]))
+                append_debug('<{}> last entry: {}'.format(self.my_id, self.log[last_idx]))
+
             msg['last_term'] = self.log[last_idx]['term'] if last_idx >= 0 else -1
 
             self.send_message(msg)
@@ -277,7 +284,7 @@ class KVStore(object):
             self.send_message(resp)
 
     def append_and_ack(self, new_entries: list):
-        debug('<{}> append {}'.format(self.my_id, new_entries))
+        append_debug('<{}> append {}'.format(self.my_id, new_entries))
         self.log += new_entries
 
         resp = self.build_base_message(self.leader, OK)
