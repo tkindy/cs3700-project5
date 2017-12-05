@@ -304,9 +304,8 @@ class KVStore(object):
             return
 
         last_idx = msg['last_index']
-        last_entry = self.log[last_idx]
 
-        if last_entry['term'] == msg['last_term']:
+        if len(self.log) >= last_idx + 1 and self.log[last_idx]['term'] == msg['last_term']:
             self.log = self.log[:last_idx + 1]
             self.append_and_ack(msg['entries'])
         else:
