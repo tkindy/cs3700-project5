@@ -34,6 +34,8 @@ HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 10
 # for debugging
 DEBUG = True
 TXRX_DEBUG = False
+APPEND_DEBUG = False
+CLIENT_DEBUG = True
 
 
 # print if debug is on
@@ -44,6 +46,14 @@ def debug(data: str):
 
 def txrx_debug(data: str):
     if TXRX_DEBUG:
+        debug(data)
+
+def append_debug(data: str):
+    if APPEND_DEBUG:
+        debug(data)
+
+def client_debug(data: str):
+    if CLIENT_DEBUG:
         debug(data)
 
 
@@ -73,6 +83,7 @@ class KVStore(object):
         self.term = 0
 
         self.log = []
+        self.outstanding_puts = {}
 
         self.timeout = None
         self.reset_timeout()
@@ -95,7 +106,9 @@ class KVStore(object):
             PUT: self.drop_message,
             REQ_VOTE: self.drop_message,
             VOTE: self.tally_vote,
-            APPEND: self.maybe_drop_out
+            APPEND: self.maybe_drop_out,
+            OK: self.drop_message,
+            FAIL: self.drop_message
         }
 
         self.follower_handlers = {
@@ -103,7 +116,9 @@ class KVStore(object):
             PUT: self.redirect_request,
             REQ_VOTE: self.cast_vote,
             VOTE: self.drop_message,
-            APPEND: self.append_entries
+            APPEND: self.append_entries,
+            OK: self.drop_message,
+            FAIL: self.drop_message
         }
 
     def build_socket(self):
@@ -170,7 +185,7 @@ class KVStore(object):
 
             txrx_debug('{} received {} msg from {}'.format(self.my_id, msg_t, msg['src']))
 
-            if 'term' in msg and msg['term'] > self.term:
+            if 'term' in msg and msg['term'] > self.term and msg['leader'] != 'FFFF':
                 self.update_term(msg)
 
             if self.state is State.LEADER:
@@ -196,17 +211,16 @@ class KVStore(object):
             self.fail_request(req)
 
     def handle_put(self, req: dict):
+        new_idx = len(self.log)
         entry = {
-            'index': len(self.log),
+            'index': new_idx,
             'term': self.term,
             'key': req['key'],
             'value': req['value']
         }
 
         self.log.append(entry)
-
-        msg = self.build_base_response(req, OK)
-        self.send_message(msg)
+        self.outstanding_puts[new_idx] = req
 
     def fail_request(self, req: dict):
         msg = self.build_base_response(req, FAIL)
@@ -228,6 +242,7 @@ class KVStore(object):
         self.set_leader(self.my_id)
         debug('{} has been selected for term {}'.format(self.my_id, self.term))
 
+        self.outstanding_puts = {}
         self.next_indices = {replica_id: len(self.log) for replica_id in self.replica_ids}
         self.send_appends()
 
@@ -238,12 +253,20 @@ class KVStore(object):
             msg = self.build_base_message(replica_id, APPEND)
             msg['committed'] = self.committed_index
             next_idx = self.next_indices[replica_id]
+
+            append_debug('<{}> log: {}'.format(self.my_id, len(self.log)))
+            append_debug('<{}> next: {}'.format(replica_id, next_idx))
+
             msg['next_index'] = next_idx
             msg['entries'] = self.log[next_idx:]
 
             last_idx = next_idx - 1
             msg['last_index'] = last_idx
-            msg['last_term'] = self.log[last_idx]['term']
+
+            if last_idx >= 0:
+                append_debug('<{}> last entry: {}'.format(self.my_id, self.log[last_idx]))
+
+            msg['last_term'] = self.log[last_idx]['term'] if last_idx >= 0 else -1
 
             self.send_message(msg)
 
@@ -266,7 +289,8 @@ class KVStore(object):
             self.send_message(resp)
 
     def append_and_ack(self, new_entries: list):
-        self.log.append(new_entries)
+        append_debug('<{}> append {}'.format(self.my_id, new_entries))
+        self.log += new_entries
 
         resp = self.build_base_message(self.leader, OK)
         resp['next_index'] = len(self.log)
@@ -284,6 +308,15 @@ class KVStore(object):
 
         new_committed = nexts[self.majority - 1] - 1
         self.apply_commit(new_committed)
+
+        finish_puts = [(idx, req) for idx, req in self.outstanding_puts.items() if idx <= self.committed_index]
+
+        for idx, req in finish_puts:
+            client_debug('<{}> put ID {} committed'.format(self.my_id, req['MID']))
+            resp = self.build_base_response(req, OK)
+            self.send_message(resp)
+
+            del self.outstanding_puts[idx]
 
     def apply_commit(self, new_committed: int):
         for entry in self.log[self.committed_index + 1:new_committed + 1]:
