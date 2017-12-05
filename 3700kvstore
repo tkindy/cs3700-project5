@@ -243,6 +243,9 @@ class KVStore(object):
             msg = self.build_base_message(replica_id, APPEND)
             msg['committed'] = self.committed_index
             next_idx = self.next_indices[replica_id]
+
+            debug('<{}> next: {}'.format(replica_id, next_idx))
+
             msg['next_index'] = next_idx
             msg['entries'] = self.log[next_idx:]
 
