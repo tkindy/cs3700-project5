@@ -354,6 +354,7 @@ class KVStore(object):
     def apply_commit(self, new_committed: int):
         for entry in self.log[self.committed_index + 1:new_committed + 1]:
             self.data[entry['key']] = entry['value']
+            debug('<{}> {} = {}'.format(self.my_id, entry['key'], entry['value']))
 
         self.committed_index = new_committed
 
