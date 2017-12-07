@@ -340,6 +340,8 @@ class KVStore(object):
         nexts = list(self.next_indices.values())
         nexts.sort(reverse=True)
 
+        debug('<{}> {}'.format(self.my_id, nexts))
+
         new_committed = nexts[self.majority - 1] - 1
         self.apply_commit(new_committed)
 
