@@ -96,7 +96,7 @@ class KVStore(object):
         self.candidate_handlers = {
             GET: self.drop_message,
             PUT: self.drop_message,
-            REQ_VOTE: self.maybe_drop_out,
+            REQ_VOTE: self.drop_message,
             VOTE: self.tally_vote,
             APPEND: self.maybe_drop_out,
             OK: self.drop_message,
