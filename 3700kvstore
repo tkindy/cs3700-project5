@@ -253,7 +253,7 @@ class KVStore(object):
             'value': req['value']
         }
 
-        debug('<{}> {} request'.format(self.my_id, new_idx))
+        # debug('<{}> {} request'.format(self.my_id, new_idx))
 
         self.log.append(entry)
         self.outstanding_puts[new_idx] = req
@@ -341,7 +341,7 @@ class KVStore(object):
         nexts = list(self.next_indices.values())
         nexts.sort(reverse=True)
 
-        debug('<{}> {}'.format(self.my_id, nexts))
+        # debug('<{}> {}'.format(self.my_id, nexts))
 
         new_committed = nexts[self.majority - 2] - 1
         self.apply_commit(new_committed)
@@ -349,7 +349,7 @@ class KVStore(object):
         finish_puts = [(idx, req) for idx, req in self.outstanding_puts.items() if idx <= self.committed_index]
 
         for idx, req in finish_puts:
-            debug('<{}> {} committed'.format(self.my_id, idx))
+            # debug('<{}> {} committed'.format(self.my_id, idx))
             resp = self.build_base_response(req, OK)
             self.send_message(resp)
 
