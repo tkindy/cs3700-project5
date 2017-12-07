@@ -106,7 +106,6 @@ class KVStore(object):
         self.term = 0
 
         self.log = []
-        self.outstanding_puts = {}
 
         self.timeout = None
         self.reset_timeout()
@@ -248,6 +247,8 @@ class KVStore(object):
         new_idx = len(self.log)
         entry = {
             'index': new_idx,
+            'MID': req['MID'],
+            'src': req['src'],
             'term': self.term,
             'key': req['key'],
             'value': req['value']
@@ -256,7 +257,6 @@ class KVStore(object):
         # debug('<{}> {} request'.format(self.my_id, new_idx))
 
         self.log.append(entry)
-        self.outstanding_puts[new_idx] = req
         self.send_appends()
 
     def fail_request(self, req: dict):
@@ -280,7 +280,6 @@ class KVStore(object):
         self.set_leader(self.my_id)
         # election_debug('{} has been selected for term {}'.format(self.my_id, self.term))
 
-        self.outstanding_puts = {}
         self.next_indices = {replica_id: len(self.log) for replica_id in self.replica_ids}
         self.send_appends()
 
@@ -323,6 +322,12 @@ class KVStore(object):
             resp = self.build_base_message(msg['src'], FAIL)
             self.send_message(resp)
 
+    def apply_commit(self, new_committed: int):
+        for entry in self.log[self.committed_index + 1:new_committed + 1]:
+            self.data[entry['key']] = entry['value']
+
+        self.committed_index = new_committed
+
     def append_and_ack(self, new_entries: list):
         # append_debug('<{}> append {}'.format(self.my_id, new_entries))
         self.log += new_entries
@@ -344,20 +349,12 @@ class KVStore(object):
         # debug('<{}> {}'.format(self.my_id, nexts))
 
         new_committed = nexts[self.majority - 2] - 1
-        self.apply_commit(new_committed)
 
-        finish_puts = [(idx, req) for idx, req in self.outstanding_puts.items() if idx <= self.committed_index]
-
-        for idx, req in finish_puts:
-            # debug('<{}> {} committed'.format(self.my_id, idx))
-            resp = self.build_base_response(req, OK)
-            self.send_message(resp)
-
-            del self.outstanding_puts[idx]
-
-    def apply_commit(self, new_committed: int):
         for entry in self.log[self.committed_index + 1:new_committed + 1]:
             self.data[entry['key']] = entry['value']
+
+            resp = self.build_base_response({'src': entry['src'], 'MID': entry['MID']}, OK)
+            self.send_message(resp)
 
         self.committed_index = new_committed
 
