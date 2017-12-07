@@ -331,10 +331,10 @@ class KVStore(object):
         self.cast_vote(msg)
 
     def update_term(self, msg: dict):
-        if msg['term'] > self.term:
+        if msg['term'] >= self.term:
             self.term = msg['term']
 
-            if msg['leader'] != self.leader:
+            if msg['leader'] != 'FFFF' and msg['leader'] != self.leader:
                 self.set_leader(msg['leader'])
 
     def set_leader(self, leader: str):
