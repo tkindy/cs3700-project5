@@ -155,7 +155,7 @@ class KVStore(object):
         self.leader = 'FFFF'
         self.votes = 1  # start by voting for yourself
 
-        # debug('{} started an election for term {}'.format(self.my_id, self.term))
+        debug('<{}> start election for term {}'.format(self.my_id, self.term))
 
         self.request_votes()
 
@@ -234,7 +234,6 @@ class KVStore(object):
         self.send_message(msg)
 
     def redirect_request(self, req: dict):
-        # debug("<{}> redirecting to {}".format(self.my_id, self.leader))
         msg = self.build_base_response(req, REDIRECT)
         self.send_message(msg)
 
@@ -248,7 +247,7 @@ class KVStore(object):
     def inaugurate(self):
         self.state = State.LEADER
         self.set_leader(self.my_id)
-        # debug('{} has been selected for term {}'.format(self.my_id, self.term))
+        debug('<{}> leader for term {}'.format(self.my_id, self.term))
 
         self.next_indices = {replica_id: len(self.log) for replica_id in self.replica_ids}
         self.send_appends()
@@ -259,18 +258,11 @@ class KVStore(object):
             msg['committed'] = self.committed_index
             next_idx = self.next_indices[replica_id]
 
-            # debug('<{}> log: {}'.format(self.my_id, len(self.log)))
-            # debug('<{}> next: {}'.format(replica_id, next_idx))
-
             msg['next_index'] = next_idx
             msg['entries'] = self.log[next_idx:next_idx + MAX_APPENDS]
 
             last_idx = next_idx - 1
             msg['last_index'] = last_idx
-
-            # if last_idx >= 0:
-            #     debug('<{}> last entry: {}'.format(self.my_id, self.log[last_idx]))
-
             msg['last_term'] = self.log[last_idx]['term'] if last_idx >= 0 else -1
 
             self.send_message(msg)
@@ -299,7 +291,6 @@ class KVStore(object):
         self.committed_index = new_committed
 
     def append_and_ack(self, new_entries: list):
-        # debug('<{}> append {}'.format(self.my_id, new_entries))
         self.log += new_entries
 
         resp = self.build_base_message(self.leader, OK)
@@ -315,9 +306,6 @@ class KVStore(object):
     def commit_entries(self):
         nexts = list(self.next_indices.values())
         nexts.sort(reverse=True)
-
-        # debug('<{}> {}'.format(self.my_id, nexts))
-
         new_committed = nexts[self.majority - 2] - 1
 
         for entry in self.log[self.committed_index + 1:new_committed + 1]:
@@ -330,7 +318,7 @@ class KVStore(object):
 
     def maybe_drop_out(self, msg: dict):
         if msg['term'] >= self.term:
-            # debug('{} dropping out for term {}'.format(self.my_id, self.term))
+            debug('<{}> dropping out for term {}'.format(self.my_id, self.term))
             self.state = State.FOLLOWER
             self.term = msg['term']
             self.set_leader(msg['src'])
@@ -345,7 +333,7 @@ class KVStore(object):
                 self.set_leader(msg['leader'])
 
     def set_leader(self, leader: str):
-        # debug('{} recognizes {} as leader for term {}'.format(self.my_id, leader, self.term))
+        debug('<{}> {} is leader for term {}'.format(self.my_id, leader, self.term))
         self.leader = leader
 
         if self.leader == self.my_id:
@@ -357,7 +345,7 @@ class KVStore(object):
 
     def cast_vote(self, req: dict):
         if req['term'] in self.voted_for:
-            # debug('{} already voted for term {}'.format(self.my_id, req['term']))
+            debug('<{}> already voted for term {}'.format(self.my_id, req['term']))
             return
 
         last_entry = self.last_entry()
@@ -371,8 +359,7 @@ class KVStore(object):
         msg = self.build_base_message(req['src'], VOTE)
         msg['vote'] = candidate
 
-        # debug(
-        #    '{} casting vote for {} for term {}'.format(self.my_id, self.voted_for[req['term']], req['term']))
+        debug('<{}> voting for {} for term {}'.format(self.my_id, self.voted_for[req['term']], req['term']))
 
         self.send_message(msg)
         self.reset_timeout()
