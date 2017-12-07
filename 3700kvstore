@@ -313,16 +313,16 @@ class KVStore(object):
 
     def update_term(self, msg: dict):
         if 'term' in msg and msg['term'] > self.term:
-            self.set_term(msg['term'], msg['leader'])
+            self.set_term(msg['term'])
 
     def drop_out(self, msg: dict):
         if msg['term'] >= self.term:
-            self.set_term(msg['term'], msg['leader'])
+            self.set_term(msg['term'])
+            self.set_leader(msg['leader'])
 
-    def set_term(self, term: int, leader: str):
+    def set_term(self, term: int):
         self.term = term
         self.voted_for = None
-        self.set_leader(leader)
 
     def set_leader(self, leader: str):
         debug('<{}> {} is leader for term {}'.format(self.my_id, leader, self.term))
