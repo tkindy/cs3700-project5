@@ -318,6 +318,7 @@ class KVStore(object):
         self.committed_index = new_committed
 
     def maybe_drop_out(self, msg: dict):
+        debug('<{}> {} term is {}'.format(self.my_id, msg['src'], msg['term']))
         if msg['term'] >= self.term:
             debug('<{}> dropping out for term {}'.format(self.my_id, self.term))
             self.state = State.FOLLOWER
