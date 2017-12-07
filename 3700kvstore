@@ -188,8 +188,12 @@ class KVStore(object):
 
             # debug('{} received {} msg from {}'.format(self.my_id, msg_t, msg['src']))
 
-            if 'term' in msg and msg['term'] > self.term and msg['leader'] != 'FFFF':
-                self.update_term(msg)
+            if 'term' in msg:
+                if msg['term'] > self.term and msg['leader'] != 'FFFF':
+                    self.update_term(msg)
+                elif msg['term'] < self.term:
+                    self.drop_message(msg)
+                    return
 
             if self.state is State.LEADER:
                 self.leader_handlers[msg_t](msg)
