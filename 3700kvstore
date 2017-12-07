@@ -86,7 +86,7 @@ class KVStore(object):
         self.leader_handlers = {
             GET: self.handle_get,
             PUT: self.handle_put,
-            REQ_VOTE: self.update_term_and_vote,
+            REQ_VOTE: self.drop_message,
             VOTE: self.drop_message,
             APPEND: self.update_term,
             OK: self.handle_ok,
@@ -98,7 +98,7 @@ class KVStore(object):
             PUT: self.drop_message,
             REQ_VOTE: self.drop_message,
             VOTE: self.tally_vote,
-            APPEND: self.maybe_drop_out,
+            APPEND: self.update_term,
             OK: self.drop_message,
             FAIL: self.drop_message
         }
@@ -187,10 +187,6 @@ class KVStore(object):
             msg_t = msg['type']
 
             # debug('{} received {} msg from {}'.format(self.my_id, msg_t, msg['src']))
-
-            if 'term' in msg:
-                if msg['term'] > self.term and msg['leader'] != 'FFFF':
-                    self.update_term(msg)
 
             if self.state is State.LEADER:
                 self.leader_handlers[msg_t](msg)
@@ -316,20 +312,6 @@ class KVStore(object):
             self.send_message(resp)
 
         self.committed_index = new_committed
-
-    def maybe_drop_out(self, msg: dict):
-        debug('<{}> {} term is {}'.format(self.my_id, msg['src'], msg['term']))
-        if msg['term'] >= self.term:
-            debug('<{}> dropping out for term {}'.format(self.my_id, self.term))
-            self.state = State.FOLLOWER
-            self.term = msg['term']
-            self.set_leader(msg['src'])
-
-            self.update_term(msg)
-
-    def update_term_and_vote(self, msg: dict):
-        self.update_term(msg)
-        self.cast_vote(msg)
 
     def update_term(self, msg: dict):
         if msg['term'] >= self.term:
