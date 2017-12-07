@@ -245,6 +245,7 @@ class KVStore(object):
             self.fail_request(req)
 
     def handle_put(self, req: dict):
+        debug('<{}> {} request'.format(self.my_id, req['MID']))
         new_idx = len(self.log)
         entry = {
             'index': new_idx,
@@ -331,7 +332,6 @@ class KVStore(object):
 
     def handle_ok(self, msg: dict):
         self.next_indices[msg['src']] = msg['next_index']
-        debug('<{}> {} has {}'.format(self.my_id, msg['src'], msg['next_index']))
 
     def handle_fail(self, msg: dict):
         self.next_indices[msg['src']] -= 1
@@ -346,7 +346,7 @@ class KVStore(object):
         finish_puts = [(idx, req) for idx, req in self.outstanding_puts.items() if idx <= self.committed_index]
 
         for idx, req in finish_puts:
-            # client_debug('<{}> put ID {} committed'.format(self.my_id, req['MID']))
+            debug('<{}> {} committed'.format(self.my_id, req['MID']))
             resp = self.build_base_response(req, OK)
             self.send_message(resp)
 
