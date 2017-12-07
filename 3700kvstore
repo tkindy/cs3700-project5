@@ -313,6 +313,7 @@ class KVStore(object):
 
     def update_term(self, msg: dict):
         if 'term' in msg and msg['term'] > self.term:
+            self.state = State.FOLLOWER
             self.set_term(msg['term'])
 
     def drop_out(self, msg: dict):
