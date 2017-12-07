@@ -155,7 +155,7 @@ class KVStore(object):
         self.votes = 1  # start by voting for yourself
         self.leader = 'FFFF'
 
-        debug('<{}> start election for term {}'.format(self.my_id, self.term))
+        # debug('<{}> start election for term {}'.format(self.my_id, self.term))
 
         self.reset_timeout()
 
@@ -166,7 +166,7 @@ class KVStore(object):
             msg['last_term'] = last_entry['term']
             msg['last_index'] = last_entry['index']
 
-            debug('<{}> requesting vote from {}'.format(self.my_id, replica_id))
+            # debug('<{}> requesting vote from {}'.format(self.my_id, replica_id))
             self.send_message(msg)
 
     def last_entry(self):
@@ -241,7 +241,7 @@ class KVStore(object):
             self.inaugurate()
 
     def inaugurate(self):
-        debug('<{}> inaugurated for {}'.format(self.my_id, self.term))
+        # debug('<{}> inaugurated for {}'.format(self.my_id, self.term))
 
         self.set_leader(self.my_id)
         self.next_indices = {replica_id: len(self.log) for replica_id in self.replica_ids}
@@ -329,7 +329,7 @@ class KVStore(object):
         self.voted_for = None
 
     def set_leader(self, leader: str):
-        debug('<{}> {} is leader for term {}'.format(self.my_id, leader, self.term))
+        # debug('<{}> {} is leader for term {}'.format(self.my_id, leader, self.term))
         self.leader = leader
 
         if self.leader == self.my_id:
@@ -340,9 +340,9 @@ class KVStore(object):
         self.reset_timeout()
 
     def cast_vote(self, req: dict):
-        debug('<{}> received request from {}'.format(self.my_id, req['src']))
+        # debug('<{}> received request from {}'.format(self.my_id, req['src']))
         if self.voted_for:
-            debug('<{}> already voted for term {}'.format(self.my_id, req['term']))
+            # debug('<{}> already voted for term {}'.format(self.my_id, req['term']))
             return
 
         last_entry = self.last_entry()
@@ -355,7 +355,7 @@ class KVStore(object):
         self.voted_for = candidate
         msg = self.build_base_message(req['src'], VOTE)
 
-        debug('<{}> voting for {} for term {}'.format(self.my_id, self.voted_for, req['term']))
+        # debug('<{}> voting for {} for term {}'.format(self.my_id, self.voted_for, req['term']))
 
         self.send_message(msg)
         self.reset_timeout()
