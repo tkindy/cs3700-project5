@@ -16,7 +16,7 @@ MAX_BYTES = 2 ** 15
 # Maximum number of entries to send per append_entries RPC
 MAX_APPENDS = 25
 # Inclusive election timeout bounds (min, max), in seconds
-ELECT_TO_BOUNDS = (0.15, 0.3)
+ELECT_TO_BOUNDS = (0.25, 0.5)
 
 # Message type constants
 GET = 'get'
