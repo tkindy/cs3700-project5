@@ -86,7 +86,7 @@ class KVStore(object):
         self.leader_handlers = {
             GET: self.handle_get,
             PUT: self.handle_put,
-            REQ_VOTE: self.resign,
+            REQ_VOTE: self.update_term_and_vote,
             VOTE: self.drop_message,
             APPEND: self.update_term,
             OK: self.handle_ok,
@@ -170,12 +170,6 @@ class KVStore(object):
             self.send_message(msg)
 
         self.reset_timeout()
-
-    def resign(self, msg: dict):
-        if msg['term'] > self.term:
-            self.state = State.FOLLOWER
-            self.leader = 'FFFF'
-            self.cast_vote(msg)
 
     def last_entry(self):
         return self.log[-1] if self.log else DUMMY_ENTRY
@@ -331,8 +325,12 @@ class KVStore(object):
 
             self.update_term(msg)
 
+    def update_term_and_vote(self, msg: dict):
+        self.update_term(msg)
+        self.cast_vote(msg)
+
     def update_term(self, msg: dict):
-        if msg['term'] >= self.term:
+        if msg['term'] > self.term:
             self.term = msg['term']
 
             if msg['leader'] != self.leader:
