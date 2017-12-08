@@ -115,6 +115,8 @@ class KVStore(object):
         self.voted_for = self.my_id
         self.votes = 1
 
+        self.debug('starting election for term {}'.format(self.term))
+
         self.reset_timeout()
 
         for replica_id in self.replica_ids:
@@ -179,6 +181,8 @@ class KVStore(object):
 
         if msg['term'] >= self.term and (not self.voted_for or self.voted_for == msg['src']):
             self.voted_for = msg['src']
+            self.debug('voting for {}'.format(self.voted_for))
+            self.send_message(self.build_base_message(msg['src'], VOTE))
 
     def receive_message(self):
         """Receive and handle a message from the socket."""
