@@ -1,0 +1,393 @@
+#!/usr/bin/python3
+
+from enum import Enum
+from json import dumps, loads
+from random import uniform
+from select import select
+from socket import AF_UNIX, SOCK_SEQPACKET, socket
+from sys import argv
+from time import time
+
+# CONSTANTS
+# Timeout for the call to select, in seconds
+SELECT_TIMEOUT = 0.01
+# Maximum amount of data to receive from the socket, in bytes
+MAX_BYTES = 2 ** 15
+# Maximum number of entries to send per append_entries RPC
+MAX_APPENDS = 25
+# Inclusive election timeout bounds (min, max), in seconds
+ELECT_TO_BOUNDS = (0.25, 0.5)
+
+# Message type constants
+GET = 'get'
+PUT = 'put'
+REQ_VOTE = 'request_vote'
+VOTE = 'vote'
+APPEND = 'append_entries'
+OK = 'ok'
+FAIL = 'fail'
+
+REDIRECT = 'redirect'
+
+# DERIVED CONSTANTS
+# Leader heartbeat interval, in seconds
+HEARTBEAT_INTERVAL = ELECT_TO_BOUNDS[0] / 2
+
+DUMMY_ENTRY = {
+    'index': -1,
+    'term': -1,
+    'key': '',
+    'value': ''
+}
+
+# for debugging
+DEBUG = True
+
+
+# print if debug is on
+def debug(data: str):
+    if DEBUG:
+        print(data)
+
+
+class State(Enum):
+    """Server states"""
+    FOLLOWER = 1
+    CANDIDATE = 2
+    LEADER = 3
+
+
+class KVStore(object):
+    """The key-value store program."""
+
+    def __init__(self, my_id: str, replica_ids: list):
+        self.my_id = my_id
+        self.replica_ids = replica_ids
+        self.majority = (len(self.replica_ids) + 1) // 2 + 1
+
+        self.next_indices = {replica_id: 0 for replica_id in replica_ids}
+        self.committed_index = -1
+
+        self.data = {}
+
+        self.sock = self.build_socket()
+        self.state = State.FOLLOWER
+        self.leader = 'FFFF'
+        self.term = 0
+
+        self.log = []
+
+        self.timeout = None
+        self.reset_timeout()
+
+        self.voted_for = None
+        self.votes = 0
+
+        self.leader_handlers = {
+            GET: self.handle_get,
+            PUT: self.handle_put,
+            REQ_VOTE: self.drop_message,
+            VOTE: self.drop_message,
+            APPEND: self.drop_message,
+            OK: self.handle_ok,
+            FAIL: self.handle_fail
+        }
+
+        self.candidate_handlers = {
+            GET: self.drop_message,
+            PUT: self.drop_message,
+            REQ_VOTE: self.drop_message,
+            VOTE: self.tally_vote,
+            APPEND: self.drop_out,
+            OK: self.drop_message,
+            FAIL: self.drop_message
+        }
+
+        self.follower_handlers = {
+            GET: self.redirect_request,
+            PUT: self.redirect_request,
+            REQ_VOTE: self.cast_vote,
+            VOTE: self.drop_message,
+            APPEND: self.append_entries,
+            OK: self.drop_message,
+            FAIL: self.drop_message
+        }
+
+    def build_socket(self):
+        """Build the UNIX domain socket."""
+        sock = socket(AF_UNIX, SOCK_SEQPACKET)
+        sock.connect(self.my_id)
+
+        return sock
+
+    def reset_timeout(self):
+        if self.state in [State.CANDIDATE, State.FOLLOWER]:
+            self.timeout = time() + uniform(ELECT_TO_BOUNDS[0], ELECT_TO_BOUNDS[1])
+
+        elif self.state is State.LEADER:
+            self.timeout = time() + HEARTBEAT_INTERVAL
+
+        else:
+            self.unknown_state()
+
+    def run(self):
+        """Run the key-value store."""
+        while True:
+            diff = self.timeout - time()
+            if diff <= 0:
+                if self.state in [State.CANDIDATE, State.FOLLOWER]:
+                    self.start_election()
+
+                elif self.state is State.LEADER:
+                    self.reset_timeout()
+                    self.send_appends()
+                    self.commit_entries()
+
+                else:
+                    self.unknown_state()
+            # elif self.state is State.LEADER:
+            #     debug('time diff: {}'.format(diff))
+            self.handle_message()
+
+    def start_election(self):
+        self.state = State.CANDIDATE
+        self.term += 1
+        self.votes = 1  # start by voting for yourself
+        self.leader = 'FFFF'
+
+        # debug('<{}> start election for term {}'.format(self.my_id, self.term))
+
+        self.reset_timeout()
+
+        for replica_id in self.replica_ids:
+            msg = self.build_base_message(replica_id, REQ_VOTE)
+
+            last_entry = self.last_entry()
+            msg['last_term'] = last_entry['term']
+            msg['last_index'] = last_entry['index']
+
+            # debug('<{}> requesting vote from {}'.format(self.my_id, replica_id))
+            self.send_message(msg)
+
+    def last_entry(self):
+        return self.log[-1] if self.log else DUMMY_ENTRY
+
+    def handle_message(self):
+        ready = select([self.sock], [], [], SELECT_TIMEOUT)[0]
+
+        if ready:
+            msg_raw = self.sock.recv(MAX_BYTES)
+
+            if not msg_raw:
+                return
+
+            msg = loads(msg_raw.decode('utf-8'))
+            msg_t = msg['type']
+
+            # debug('{} received {} msg from {}'.format(self.my_id, msg_t, msg['src']))
+
+            self.update_term(msg)
+
+            if self.state is State.LEADER:
+                self.leader_handlers[msg_t](msg)
+            elif self.state is State.CANDIDATE:
+                self.candidate_handlers[msg_t](msg)
+            elif self.state is State.FOLLOWER:
+                if msg['src'] == self.leader:
+                    self.reset_timeout()
+
+                self.follower_handlers[msg_t](msg)
+            else:
+                self.unknown_state()
+
+    def handle_get(self, req: dict):
+        if req['key'] in self.data:
+            msg = self.build_base_response(req, OK)
+            msg['value'] = self.data[req['key']]
+
+            self.send_message(msg)
+
+        else:
+            self.fail_request(req)
+
+    def handle_put(self, req: dict):
+        new_idx = len(self.log)
+        entry = {
+            'index': new_idx,
+            'MID': req['MID'],
+            'src': req['src'],
+            'term': self.term,
+            'key': req['key'],
+            'value': req['value']
+        }
+
+        # debug('<{}> {} request'.format(self.my_id, new_idx))
+
+        self.log.append(entry)
+        self.send_appends()
+
+    def fail_request(self, req: dict):
+        msg = self.build_base_response(req, FAIL)
+        self.send_message(msg)
+
+    def redirect_request(self, req: dict):
+        msg = self.build_base_response(req, REDIRECT)
+        self.send_message(msg)
+
+    def tally_vote(self, msg: dict):  # parameter not used but needed to abide by interface
+        self.votes += 1
+
+        if self.votes >= self.majority:
+            self.inaugurate()
+
+    def inaugurate(self):
+        # debug('<{}> inaugurated for {}'.format(self.my_id, self.term))
+
+        self.set_leader(self.my_id)
+        self.next_indices = {replica_id: len(self.log) for replica_id in self.replica_ids}
+        self.send_appends()
+
+    def send_appends(self):
+        for replica_id in self.replica_ids:
+            msg = self.build_base_message(replica_id, APPEND)
+            msg['committed'] = self.committed_index
+            next_idx = self.next_indices[replica_id]
+
+            msg['next_index'] = next_idx
+            msg['entries'] = self.log[next_idx:next_idx + MAX_APPENDS]
+
+            last_idx = next_idx - 1
+            msg['last_index'] = last_idx
+            msg['last_term'] = self.log[last_idx]['term'] if last_idx >= 0 else -1
+
+            self.send_message(msg)
+
+    def append_entries(self, msg: dict):
+        if msg['leader'] != self.leader:
+            self.set_leader(msg['leader'])
+
+        self.apply_commit(msg['committed'])
+
+        if not msg['next_index']:
+            self.log = []
+            self.append_and_ack(msg['entries'])
+            return
+
+        last_idx = msg['last_index']
+
+        if len(self.log) >= last_idx + 1 and self.log[last_idx]['term'] == msg['last_term']:
+            self.log = self.log[:last_idx + 1]
+            self.append_and_ack(msg['entries'])
+        else:
+            resp = self.build_base_message(msg['src'], FAIL)
+            self.send_message(resp)
+
+    def apply_commit(self, new_committed: int):
+        for entry in self.log[self.committed_index + 1:new_committed + 1]:
+            self.data[entry['key']] = entry['value']
+
+        self.committed_index = new_committed
+
+    def append_and_ack(self, new_entries: list):
+        self.log += new_entries
+
+        resp = self.build_base_message(self.leader, OK)
+        resp['next_index'] = len(self.log)
+        self.send_message(resp)
+
+    def handle_ok(self, msg: dict):
+        self.next_indices[msg['src']] = msg['next_index']
+
+    def handle_fail(self, msg: dict):
+        self.next_indices[msg['src']] -= 1
+
+    def commit_entries(self):
+        nexts = list(self.next_indices.values())
+        nexts.sort(reverse=True)
+        new_committed = nexts[self.majority - 2] - 1
+
+        for entry in self.log[self.committed_index + 1:new_committed + 1]:
+            self.data[entry['key']] = entry['value']
+
+            resp = self.build_base_response({'src': entry['src'], 'MID': entry['MID']}, OK)
+            self.send_message(resp)
+
+        self.committed_index = new_committed
+
+    def update_term(self, msg: dict):
+        if 'term' in msg and msg['term'] > self.term:
+            self.set_term(msg['term'])
+            self.state = State.FOLLOWER
+
+    def drop_out(self, msg: dict):
+        if msg['term'] >= self.term:
+            self.set_term(msg['term'])
+            self.set_leader(msg['leader'])
+
+    def set_term(self, term: int):
+        self.term = term
+        self.voted_for = None
+
+    def set_leader(self, leader: str):
+        # debug('<{}> {} is leader for term {}'.format(self.my_id, leader, self.term))
+        self.leader = leader
+
+        if self.leader == self.my_id:
+            self.state = State.LEADER
+        else:
+            self.state = State.FOLLOWER
+
+        self.reset_timeout()
+
+    def cast_vote(self, req: dict):
+        # debug('<{}> received request from {}'.format(self.my_id, req['src']))
+        if self.voted_for:
+            # debug('<{}> already voted for term {}'.format(self.my_id, req['term']))
+            return
+
+        last_entry = self.last_entry()
+
+        if req['last_term'] < last_entry['term'] or \
+                (req['last_term'] == last_entry['term'] and req['last_index'] < last_entry['index']):
+            return
+
+        candidate = req['src']
+        self.voted_for = candidate
+        msg = self.build_base_message(req['src'], VOTE)
+
+        # debug('<{}> voting for {} for term {}'.format(self.my_id, self.voted_for, req['term']))
+
+        self.send_message(msg)
+        self.reset_timeout()
+
+    def build_base_response(self, req: dict, msg_type: str) -> dict:
+        resp = self.build_base_message(req['src'], msg_type)
+        resp['MID'] = req['MID']
+
+        return resp
+
+    def build_base_message(self, dst: str, msg_type: str) -> dict:
+        return {
+            'src': self.my_id,
+            'dst': dst,
+            'leader': self.leader,
+            'term': self.term,
+            'type': msg_type
+        }
+
+    def send_message(self, msg: dict):
+        """Send the message as JSON."""
+        # debug('{} sending {} msg to {}'.format(msg['src'], msg['type'], msg['dst']))
+        self.sock.send(dumps(msg).encode('utf-8'))
+
+    def drop_message(self, msg: dict):
+        # debug('{} dropping {} msg from {}'.format(self.my_id, msg['type'], msg['src']))
+        pass
+
+    def unknown_state(self):
+        raise RuntimeError("Unknown state '{}'".format(self.state))
+
+
+if __name__ == '__main__':
+    # run the store
+    KVStore(argv[1], argv[2:]).run()
