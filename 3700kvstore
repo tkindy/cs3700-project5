@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 from enum import Enum
-from josn import dumps, loads
+from json import dumps, loads
 from select import select
 from socket import AF_UNIX, SOCK_SEQPACKET, socket
 from sys import argv
