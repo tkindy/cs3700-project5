@@ -364,7 +364,7 @@ class KVStore(object):
         raise RuntimeError("Unknown state '{}'".format(self.state))
 
     def debug(self, msg: str):
-        print('<{}> {}'.format(self.my_id, str))
+        print('<{}> {}'.format(self.my_id, msg))
 
 
 if __name__ == '__main__':
