@@ -163,7 +163,7 @@ class KVStore(object):
         new_committed = nexts[self.majority - 2] - 1
 
         for entry in self.log[self.committed + 1:new_committed + 1]:
-            self.debug('completing {}'.format(entry['MID']))
+            # self.debug('completing {}'.format(entry['MID']))
             self.data[entry['key']] = entry['value']
             self.send_message(self.build_base_response({'src': entry['src'], 'MID': entry['MID']}, OK))
 
@@ -352,6 +352,7 @@ class KVStore(object):
 
     def send_message(self, msg: dict):
         """Send a message through the socket."""
+        self.debug('sending {} to {}'.format(msg['type'], msg['dst']))
         self.sock.send(dumps(msg).encode('utf-8'))
 
     def debug(self, msg: str):
