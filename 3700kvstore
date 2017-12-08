@@ -275,7 +275,7 @@ class KVStore(object):
 
     def set_leader(self, leader: str):
         self.leader = leader
-        # self.debug('{} is leader for term {}'.format(self.leader, self.term))
+        self.debug('{} is leader for term {}'.format(self.leader, self.term))
 
     def redirect_request(self, msg: dict):
         self.send_message(self.build_base_response(msg, REDIRECT))
