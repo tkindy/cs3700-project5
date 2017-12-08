@@ -210,6 +210,7 @@ class KVStore(object):
         return {
             'src': self.my_id,
             'dst': dest,
+            'term': self.term,
             'leader': self.leader,
             'type': msg_type
         }
