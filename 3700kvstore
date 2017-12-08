@@ -25,6 +25,7 @@ VOTE = 'vote'
 APPEND = 'append_entries'
 
 # Other message types
+OK = 'ok'
 FAIL = 'fail'
 REDIRECT = 'redirect'
 
@@ -54,9 +55,12 @@ class KVStore(object):
         self.timeout = None
         self.reset_timeout()
 
+        self.log = []
+        self.data = {}
+
         self.leader_handlers = {
-            GET: self.fail_request,
-            PUT: self.fail_request,
+            GET: self.get_key,
+            PUT: self.put_key,
             REQ_VOTE: self.drop_message,
             VOTE: self.drop_message,
             APPEND: self.drop_message
@@ -84,6 +88,25 @@ class KVStore(object):
         sock.connect(self.my_id)
 
         return sock
+
+    def get_key(self, msg: dict):
+        if msg['key'] in self.data:
+            resp = self.build_base_response(msg, OK)
+            resp['value'] = self.data[msg['key']]
+            self.send_message(resp)
+        else:
+            self.send_message(self.build_base_response(msg, FAIL))
+
+    def put_key(self, msg: dict):
+        self.log.append({
+            'index': len(self.log),
+            'term': self.term,
+            'key': msg['key'],
+            'value': msg['value']
+        })
+
+        self.data[msg['key']] = msg['value']
+        self.send_message(self.build_base_response(msg, OK))
 
     def fail_request(self, msg: dict):
         """Send a failed response to the requester."""
@@ -115,8 +138,6 @@ class KVStore(object):
         self.voted_for = self.my_id
         self.votes = 1
 
-        self.debug('starting election for term {}'.format(self.term))
-
         self.reset_timeout()
 
         for replica_id in self.replica_ids:
@@ -143,7 +164,6 @@ class KVStore(object):
             self.set_term(msg['term'])
             self.leader = msg['leader']
 
-            self.debug('leader is {}'.format(self.leader))
             self.reset_timeout()
 
         elif msg['term'] == self.term:
@@ -168,7 +188,6 @@ class KVStore(object):
         self.votes = 0
 
     def redirect_request(self, msg: dict):
-        self.debug('redirecting to {}'.format(self.leader))
         self.send_message(self.build_base_response(msg, REDIRECT))
 
     def cast_vote(self, msg: dict):
@@ -176,7 +195,6 @@ class KVStore(object):
 
         if msg['term'] >= self.term and (not self.voted_for or self.voted_for == msg['src']):
             self.voted_for = msg['src']
-            self.debug('voting for {}'.format(self.voted_for))
             self.send_message(self.build_base_message(msg['src'], VOTE))
 
     def reset_timeout(self):
