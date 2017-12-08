@@ -117,20 +117,20 @@ class KVStore(object):
 
     def put_key(self, msg: dict):
         self.log.append({
+            'src': msg['src'],
+            'MID': msg['MID'],
             'index': len(self.log),
             'term': self.term,
             'key': msg['key'],
             'value': msg['value']
         })
 
-        self.data[msg['key']] = msg['value']
-        self.send_message(self.build_base_response(msg, OK))
+        self.send_appends()
 
     def confirm_replication(self, msg: dict):
         self.next_indices[msg['src']] = msg['next_index']
 
     def fail_replication(self, msg: dict):
-        self.debug('failing {}'.format(msg['src']))
         self.next_indices[msg['src']] -= 1
 
     def fail_request(self, msg: dict):
@@ -146,6 +146,9 @@ class KVStore(object):
         while True:
             self.receive_message()
 
+            if self.state is State.LEADER:
+                self.commit_entries()
+
             if self.timed_out():
                 if self.state is State.LEADER:
                     self.send_appends()
@@ -153,6 +156,17 @@ class KVStore(object):
                     self.start_election()
                 else:
                     self.invalid_state()
+
+    def commit_entries(self):
+        nexts = list(self.next_indices.values())
+        nexts.sort(reverse=True)
+        new_committed = nexts[self.majority - 2] - 1
+
+        for entry in self.log[self.committed + 1:new_committed + 1]:
+            self.data[entry['key']] = entry['value']
+            self.send_message(self.build_base_response({'src': entry['src'], 'MID': entry['MID']}, OK))
+
+        self.committed = new_committed
 
     def timed_out(self) -> bool:
         return self.timeout - time() <= 0
@@ -208,9 +222,6 @@ class KVStore(object):
             self.reset_timeout()
             prev_index = msg['prev_index']
 
-            self.debug('log length: {}'.format(len(self.log)))
-            self.debug('prev_index: {}'.format(prev_index))
-
             if prev_index == -1 or \
                     (len(self.log) - 1 >= prev_index and self.log[prev_index]['term'] == msg['prev_term']):
                 self.log = self.log[:prev_index + 1]
@@ -219,10 +230,15 @@ class KVStore(object):
                 resp = self.build_base_message(self.leader, OK)
                 resp['next_index'] = len(self.log)
                 self.send_message(resp)
-
-                self.debug('next_index: {}'.format(len(self.log)))
             else:
                 self.send_message(self.build_base_message(self.leader, FAIL))
+
+            new_committed = min(msg['committed'], len(self.log) - 1)
+
+            for entry in self.log[self.committed + 1:new_committed + 1]:
+                self.data[entry['key']] = entry['value']
+
+            self.committed = new_committed
 
         else:
             self.drop_message(msg)
