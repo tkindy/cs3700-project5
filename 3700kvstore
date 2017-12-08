@@ -100,7 +100,7 @@ class KVStore(object):
             if self.timed_out():
                 if self.state is State.LEADER:
                     self.send_appends()
-                elif self.state is [State.CANDIDATE, State.FOLLOWER]:
+                elif self.state in [State.CANDIDATE, State.FOLLOWER]:
                     self.start_election()
                 else:
                     self.invalid_state()
