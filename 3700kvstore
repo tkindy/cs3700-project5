@@ -131,8 +131,8 @@ class KVStore(object):
         if msg['term'] > self.term:
             self.set_term(msg['term'])
             self.state = State.FOLLOWER
-            self.leader = msg['leader']
-            self.reset_timeout()
+            self.set_leader(msg['leader'])
+            self.cast_vote(msg)
 
     def confirm_replication(self, msg: dict):
         self.next_indices[msg['src']] = msg['next_index']
@@ -200,9 +200,8 @@ class KVStore(object):
         self.votes += 1
 
         if self.votes >= self.majority:
-            self.debug('leader for term {}'.format(self.term))
             self.state = State.LEADER
-            self.leader = self.my_id
+            self.set_leader(self.my_id)
             self.reset_votes()
 
             self.next_indices = {replica_id: len(self.log) for replica_id in self.replica_ids}
@@ -229,7 +228,7 @@ class KVStore(object):
     def append_entries(self, msg: dict):
         if msg['term'] > self.term:
             self.set_term(msg['term'])
-            self.leader = msg['leader']
+            self.set_leader(msg['leader'])
 
             self.reset_timeout()
 
@@ -262,7 +261,7 @@ class KVStore(object):
         if msg['term'] >= self.term:
             self.set_term(msg['term'])
             self.state = State.FOLLOWER
-            self.leader = msg['src']
+            self.set_leader(msg['src'])
 
     def set_term(self, term: int):
         self.term = term
@@ -272,11 +271,16 @@ class KVStore(object):
         self.voted_for = None
         self.votes = 0
 
+    def set_leader(self, leader: str):
+        self.leader = leader
+        self.debug('{} is leader for term {}'.format(self.leader, self.term))
+
     def redirect_request(self, msg: dict):
         self.send_message(self.build_base_response(msg, REDIRECT))
 
     def cast_vote(self, msg: dict):
         self.reset_timeout()
+
         prev_entry = self.log[-1] if self.log else DUMMY_ENTRY
         prev_term = prev_entry['term']
         prev_index = prev_entry['index']
