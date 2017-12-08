@@ -186,18 +186,16 @@ class KVStore(object):
         for replica_id in self.replica_ids:
             msg = self.build_base_message(replica_id, APPEND)
 
-            prev_entry = self.prev_entry()
             next_index = self.next_indices[replica_id]
+            prev_index = next_index - 1
+            prev_entry = self.log[prev_index] if prev_index >= 0 else DUMMY_ENTRY
 
-            msg['prev_index'] = prev_entry['index']
+            msg['prev_index'] = prev_index
             msg['prev_term'] = prev_entry['term']
             msg['entries'] = self.log[next_index:next_index + MAX_APPEND_ENTRIES]
             msg['committed'] = self.committed
 
             self.send_message(msg)
-
-    def prev_entry(self):
-        return self.log[-1] if self.log else DUMMY_ENTRY
 
     def append_entries(self, msg: dict):
         if msg['term'] > self.term:
