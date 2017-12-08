@@ -16,6 +16,8 @@ MAX_RECEIVE_BYTES = 2 ** 16
 ELECTION_TIMEOUT_INTERVAL = (0.25, 0.5)
 # Maximum time between leader heartbeats, in seconds
 HEARTBEAT_INTERVAL = ELECTION_TIMEOUT_INTERVAL[0] / 2
+# Maximum number of entries to send a follower in one request
+MAX_APPEND_ENTRIES = 25
 
 # Receivable message types (these need handlers)
 GET = 'get'
@@ -23,11 +25,19 @@ PUT = 'put'
 REQ_VOTE = 'request_vote'
 VOTE = 'vote'
 APPEND = 'append_entries'
-
-# Other message types
 OK = 'ok'
 FAIL = 'fail'
+
+# Other message types
 REDIRECT = 'redirect'
+
+# Dummy log entry
+DUMMY_ENTRY = {
+    'index': -1,
+    'term': -1,
+    'key': '',
+    'value': ''
+}
 
 
 class State(Enum):
@@ -57,13 +67,17 @@ class KVStore(object):
 
         self.log = []
         self.data = {}
+        self.next_indices = {replica_id: 0 for replica_id in self.replica_ids}
+        self.committed = -1
 
         self.leader_handlers = {
             GET: self.get_key,
             PUT: self.put_key,
             REQ_VOTE: self.drop_message,
             VOTE: self.drop_message,
-            APPEND: self.drop_message
+            APPEND: self.drop_message,
+            OK: self.confirm_replication,
+            FAIL: self.fail_replication
         }
 
         self.candidate_handlers = {
@@ -71,7 +85,9 @@ class KVStore(object):
             PUT: self.fail_request,
             REQ_VOTE: self.drop_message,
             VOTE: self.count_vote,
-            APPEND: self.drop_out
+            APPEND: self.drop_out,
+            OK: self.drop_message,
+            FAIL: self.drop_message
         }
 
         self.follower_handlers = {
@@ -79,7 +95,9 @@ class KVStore(object):
             PUT: self.redirect_request,
             REQ_VOTE: self.cast_vote,
             VOTE: self.drop_message,
-            APPEND: self.append_entries
+            APPEND: self.append_entries,
+            OK: self.drop_message,
+            FAIL: self.drop_message
         }
 
     def build_socket(self):
@@ -107,6 +125,12 @@ class KVStore(object):
 
         self.data[msg['key']] = msg['value']
         self.send_message(self.build_base_response(msg, OK))
+
+    def confirm_replication(self, msg: dict):
+        self.next_indices[msg['src']] = msg['next_index']
+
+    def fail_replication(self, msg: dict):
+        self.next_indices[msg['src']] -= 1
 
     def fail_request(self, msg: dict):
         """Send a failed response to the requester."""
@@ -151,13 +175,28 @@ class KVStore(object):
             self.leader = self.my_id
             self.reset_votes()
 
+            self.next_indices = {replica_id: len(self.log) for replica_id in self.replica_ids}
+
             self.send_appends()
 
     def send_appends(self):
         self.reset_timeout()
 
         for replica_id in self.replica_ids:
-            self.send_message(self.build_base_message(replica_id, APPEND))
+            msg = self.build_base_message(replica_id, APPEND)
+
+            prev_entry = self.prev_entry()
+            prev_index = prev_entry['index']
+
+            msg['prev_index'] = prev_index
+            msg['prev_term'] = prev_entry['term']
+            msg['entries'] = self.log[prev_index:prev_index + MAX_APPEND_ENTRIES]
+            msg['committed'] = self.committed
+
+            self.send_message(msg)
+
+    def prev_entry(self):
+        return self.log[-1] if self.log else DUMMY_ENTRY
 
     def append_entries(self, msg: dict):
         if msg['term'] > self.term:
@@ -168,8 +207,21 @@ class KVStore(object):
 
         elif msg['term'] == self.term:
             self.reset_timeout()
+            prev_index = msg['prev_index']
 
-            # TODO log replication
+            if prev_index == -1 or \
+                    (len(self.log) - 1 >= prev_index and self.log[prev_index]['term'] == msg['prev_term']):
+                self.log = self.log[:prev_index + 1]
+                self.log += msg['entries']
+
+                resp = self.build_base_message(self.leader, OK)
+                resp['next_index'] = len(self.log)
+                self.send_message(resp)
+
+                self.debug('next_index: {}'.format(len(self.log)))
+            else:
+                self.send_message(self.build_base_message(self.leader, FAIL))
+
         else:
             self.drop_message(msg)
 
