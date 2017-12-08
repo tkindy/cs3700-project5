@@ -260,13 +260,17 @@ class KVStore(object):
     def pass_torch(self, msg: dict):
         if msg['term'] > self.term:
             self.state = State.FOLLOWER
+            self.set_term(msg['term'] - 1)
             self.cast_vote(msg)
 
     def start_following(self, term: int, leader: str):
         self.state = State.FOLLOWER
+        self.set_term(term)
+        self.set_leader(leader)
+
+    def set_term(self, term: int):
         self.term = term
         self.reset_votes()
-        self.set_leader(leader)
 
     def reset_votes(self):
         self.voted_for = None
