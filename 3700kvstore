@@ -163,7 +163,7 @@ class KVStore(object):
         new_committed = nexts[self.majority - 2] - 1
 
         for entry in self.log[self.committed + 1:new_committed + 1]:
-            # self.debug('completing {}'.format(entry['MID']))
+            self.debug('completing {}'.format(entry['MID']))
             self.data[entry['key']] = entry['value']
             self.send_message(self.build_base_response({'src': entry['src'], 'MID': entry['MID']}, OK))
 
@@ -191,11 +191,11 @@ class KVStore(object):
             self.send_message(req)
 
     def count_vote(self, msg: dict):  # Parameter unused, but required to match interface
-        self.debug('received vote from {}'.format(msg['src']))
+        # self.debug('received vote from {}'.format(msg['src']))
         self.votes += 1
 
         if self.votes >= self.majority:
-            self.debug('I won!')
+            # self.debug('I won!')
             self.state = State.LEADER
             self.set_leader(self.my_id)
             self.reset_votes()
@@ -241,7 +241,7 @@ class KVStore(object):
             self.send_message(self.build_base_message(self.leader, FAIL))
 
         new_committed = min(msg['committed'], len(self.log) - 1)
-        self.debug('committed up to {}'.format(new_committed))
+        # self.debug('committed up to {}'.format(new_committed))
 
         for entry in self.log[self.committed + 1:new_committed + 1]:
             self.data[entry['key']] = entry['value']
@@ -278,7 +278,7 @@ class KVStore(object):
 
     def set_leader(self, leader: str):
         self.leader = leader
-        self.debug('{} is leader for term {}'.format(self.leader, self.term))
+        # self.debug('{} is leader for term {}'.format(self.leader, self.term))
 
     def redirect_request(self, msg: dict):
         self.send_message(self.build_base_response(msg, REDIRECT))
