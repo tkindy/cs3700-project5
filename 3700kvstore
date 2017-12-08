@@ -26,6 +26,7 @@ APPEND = 'append_entries'
 
 # Other message types
 FAIL = 'fail'
+REDIRECT = 'redirect'
 
 
 class State(Enum):
@@ -70,8 +71,8 @@ class KVStore(object):
         }
 
         self.follower_handlers = {
-            GET: self.fail_request,
-            PUT: self.fail_request,
+            GET: self.redirect_request,
+            PUT: self.redirect_request,
             REQ_VOTE: self.cast_vote,
             VOTE: self.drop_message,
             APPEND: self.append_entries
@@ -146,6 +147,9 @@ class KVStore(object):
         if msg['term'] > self.term:
             self.set_term(msg['term'])
             self.leader = msg['leader']
+
+            self.debug('leader is {}'.format(self.leader))
+
         elif msg['term'] == self.term:
             self.reset_timeout()
 
@@ -167,11 +171,14 @@ class KVStore(object):
         self.voted_for = None
         self.votes = 0
 
+    def redirect_request(self, msg: dict):
+        self.send_message(self.build_base_response(msg, REDIRECT))
+
     def cast_vote(self, msg: dict):
         self.reset_timeout()
+
         if msg['term'] >= self.term and (not self.voted_for or self.voted_for == msg['src']):
             self.voted_for = msg['src']
-
 
     def receive_message(self):
         """Receive and handle a message from the socket."""
@@ -218,6 +225,9 @@ class KVStore(object):
     def send_message(self, msg: dict):
         """Send a message through the socket."""
         self.sock.send(dumps(msg).encode('utf-8'))
+
+    def debug(self, msg: str):
+        print('<{}> {}'.format(self.my_id, msg))
 
 
 if __name__ == '__main__':
