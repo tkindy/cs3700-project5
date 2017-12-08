@@ -73,7 +73,7 @@ class KVStore(object):
         self.leader_handlers = {
             GET: self.get_key,
             PUT: self.put_key,
-            REQ_VOTE: self.drop_message,
+            REQ_VOTE: self.jump_term,
             VOTE: self.drop_message,
             APPEND: self.drop_message,
             OK: self.confirm_replication,
@@ -126,6 +126,13 @@ class KVStore(object):
         })
 
         self.send_appends()
+
+    def jump_term(self, msg: dict):
+        if msg['term'] > self.term:
+            self.set_term(msg['term'])
+            self.state = State.FOLLOWER
+            self.leader = msg['leader']
+            self.reset_timeout()
 
     def confirm_replication(self, msg: dict):
         self.next_indices[msg['src']] = msg['next_index']
@@ -303,12 +310,6 @@ class KVStore(object):
 
             msg = loads(msg_raw.decode('utf-8'))
             msg_t = msg['type']
-
-            if 'term' in msg and msg['term'] > self.term:
-                self.set_term(msg['term'])
-                self.state = State.FOLLOWER
-                self.leader = msg['leader']
-                self.reset_timeout()
 
             if self.state is State.LEADER:
                 self.leader_handlers[msg_t](msg)
