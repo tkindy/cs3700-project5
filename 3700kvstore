@@ -73,9 +73,9 @@ class KVStore(object):
         self.leader_handlers = {
             GET: self.get_key,
             PUT: self.put_key,
-            REQ_VOTE: self.jump_term,
+            REQ_VOTE: self.pass_torch,
             VOTE: self.drop_message,
-            APPEND: self.drop_message,
+            APPEND: self.resign,
             OK: self.confirm_replication,
             FAIL: self.fail_replication
         }
@@ -126,13 +126,6 @@ class KVStore(object):
         })
 
         self.send_appends()
-
-    def jump_term(self, msg: dict):
-        if msg['term'] > self.term:
-            self.state = State.FOLLOWER
-            self.set_term(msg['term'])
-            self.set_leader(msg['leader'])
-            self.cast_vote(msg)
 
     def confirm_replication(self, msg: dict):
         self.next_indices[msg['src']] = msg['next_index']
@@ -227,46 +220,53 @@ class KVStore(object):
             self.send_message(msg)
 
     def append_entries(self, msg: dict):
-        if msg['term'] > self.term:
-            self.set_term(msg['term'])
-            self.set_leader(msg['leader'])
-
-            self.reset_timeout()
-
-        elif msg['term'] == self.term:
-            prev_index = msg['prev_index']
-
-            if prev_index == -1 or \
-                    (len(self.log) - 1 >= prev_index and self.log[prev_index]['term'] == msg['prev_term']):
-                self.log = self.log[:prev_index + 1]
-                self.log += msg['entries']
-
-                resp = self.build_base_message(self.leader, OK)
-                resp['next_index'] = len(self.log)
-                self.send_message(resp)
-            else:
-                self.send_message(self.build_base_message(self.leader, FAIL))
-
-            new_committed = min(msg['committed'], len(self.log) - 1)
-
-            for entry in self.log[self.committed + 1:new_committed + 1]:
-                self.data[entry['key']] = entry['value']
-
-            self.committed = new_committed
-            self.reset_timeout()
-
-        else:
+        if msg['term'] < self.term:
             self.drop_message(msg)
+            return
+
+        elif msg['term'] > self.term:
+            self.start_following(msg['term'], msg['src'])
+            self.reset_timeout()
+
+        prev_index = msg['prev_index']
+
+        if prev_index == -1 or \
+                (len(self.log) - 1 >= prev_index and self.log[prev_index]['term'] == msg['prev_term']):
+            self.log = self.log[:prev_index + 1]
+            self.log += msg['entries']
+
+            resp = self.build_base_message(self.leader, OK)
+            resp['next_index'] = len(self.log)
+            self.send_message(resp)
+        else:
+            self.send_message(self.build_base_message(self.leader, FAIL))
+
+        new_committed = min(msg['committed'], len(self.log) - 1)
+
+        for entry in self.log[self.committed + 1:new_committed + 1]:
+            self.data[entry['key']] = entry['value']
+
+        self.committed = new_committed
+        self.reset_timeout()
 
     def drop_out(self, msg: dict):
         if msg['term'] >= self.term:
-            self.set_term(msg['term'])
-            self.state = State.FOLLOWER
-            self.set_leader(msg['src'])
+            self.start_following(msg['term'], msg['src'])
 
-    def set_term(self, term: int):
+    def resign(self, msg: dict):
+        if msg['term'] > self.term:
+            self.start_following(msg['term'], msg['src'])
+
+    def pass_torch(self, msg: dict):
+        if msg['term'] > self.term:
+            self.state = State.FOLLOWER
+            self.cast_vote(msg)
+
+    def start_following(self, term: int, leader: str):
+        self.state = State.FOLLOWER
         self.term = term
         self.reset_votes()
+        self.set_leader(leader)
 
     def reset_votes(self):
         self.voted_for = None
