@@ -245,6 +245,7 @@ class KVStore(object):
             self.send_message(msg)
 
     def append_entries(self, msg: dict):
+        self.set_leader(msg['leader'])
         self.apply_commit(msg['committed'])
 
         if not msg['next_index']:
