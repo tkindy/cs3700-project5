@@ -245,9 +245,6 @@ class KVStore(object):
             self.send_message(msg)
 
     def append_entries(self, msg: dict):
-        if msg['leader'] != self.leader:
-            self.set_leader(msg['leader'])
-
         self.apply_commit(msg['committed'])
 
         if not msg['next_index']:
@@ -300,6 +297,12 @@ class KVStore(object):
         if 'term' in msg and msg['term'] > self.term:
             self.set_term(msg['term'])
             self.state = State.FOLLOWER
+
+            if self.state is State.LEADER:
+                if msg['type'] == REQ_VOTE:
+                    self.cast_vote(msg)
+                elif msg['type'] == APPEND:
+                    self.set_leader(msg['src'])
 
     def drop_out(self, msg: dict):
         if msg['term'] >= self.term:
