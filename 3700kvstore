@@ -191,6 +191,7 @@ class KVStore(object):
         self.votes += 1
 
         if self.votes >= self.majority:
+            self.debug('leader for term {}'.format(self.term))
             self.state = State.LEADER
             self.leader = self.my_id
             self.reset_votes()
