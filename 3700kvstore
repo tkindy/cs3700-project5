@@ -145,7 +145,6 @@ class KVStore(object):
         """Run the key-value store."""
         while True:
             self.receive_message()
-            self.debug(self.leader)
 
             if self.state is State.LEADER:
                 self.commit_entries()
@@ -164,12 +163,10 @@ class KVStore(object):
         new_committed = nexts[self.majority - 2] - 1
 
         for entry in self.log[self.committed + 1:new_committed + 1]:
-            # self.debug('completing {}'.format(entry['MID']))
             self.data[entry['key']] = entry['value']
             self.send_message(self.build_base_response({'src': entry['src'], 'MID': entry['MID']}, OK))
 
         self.committed = new_committed
-        self.debug('{} {}'.format(nexts, self.committed))
 
     def timed_out(self) -> bool:
         return self.timeout - time() <= 0
@@ -179,8 +176,6 @@ class KVStore(object):
         self.state = State.CANDIDATE
         self.voted_for = self.my_id
         self.votes = 1
-
-        # self.debug('starting election for term {}'.format(self.term))
 
         self.reset_timeout()
 
@@ -193,11 +188,9 @@ class KVStore(object):
             self.send_message(req)
 
     def count_vote(self, msg: dict):  # Parameter unused, but required to match interface
-        # self.debug('received vote from {}'.format(msg['src']))
         self.votes += 1
 
         if self.votes >= self.majority:
-            # self.debug('I won!')
             self.state = State.LEADER
             self.set_leader(self.my_id)
             self.reset_votes()
@@ -243,7 +236,6 @@ class KVStore(object):
             self.send_message(self.build_base_message(self.leader, FAIL))
 
         new_committed = min(msg['committed'], len(self.log) - 1)
-        # self.debug('committed up to {}'.format(new_committed))
 
         for entry in self.log[self.committed + 1:new_committed + 1]:
             self.data[entry['key']] = entry['value']
@@ -280,7 +272,6 @@ class KVStore(object):
 
     def set_leader(self, leader: str):
         self.leader = leader
-        # self.debug('{} is leader for term {}'.format(self.leader, self.term))
 
     def redirect_request(self, msg: dict):
         self.send_message(self.build_base_response(msg, REDIRECT))
@@ -297,7 +288,6 @@ class KVStore(object):
                 (msg['prev_term'] > prev_term or
                  (msg['prev_term'] == prev_term and
                   msg['prev_index'] >= prev_index)):
-            # self.debug('voting for {} for term {}'.format(msg['src'], msg['term']))
             self.voted_for = msg['src']
             self.send_message(self.build_base_message(msg['src'], VOTE))
 
