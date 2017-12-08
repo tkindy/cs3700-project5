@@ -170,6 +170,7 @@ class KVStore(object):
         new_committed = nexts[self.majority - 2] - 1
 
         for entry in self.log[self.committed + 1:new_committed + 1]:
+            self.debug('completing {}'.format(entry['MID']))
             self.data[entry['key']] = entry['value']
             self.send_message(self.build_base_response({'src': entry['src'], 'MID': entry['MID']}, OK))
 
