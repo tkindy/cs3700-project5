@@ -2,18 +2,29 @@
 
 from enum import Enum
 from json import dumps, loads
+from random import uniform
 from select import select
 from socket import AF_UNIX, SOCK_SEQPACKET, socket
 from sys import argv
+from time import time
 
 # Socket receive timeout, in seconds
 RECV_TIMEOUT = 0.01
 # Maximum number of bytes to receive at once
 MAX_RECEIVE_BYTES = 2 ** 16
+# Random election timeout interval, in seconds
+ELECTION_TIMEOUT_INTERVAL = (0.25, 0.5)
+# Maximum time between leader heartbeats, in seconds
+HEARTBEAT_INTERVAL = ELECTION_TIMEOUT_INTERVAL[0] / 2
 
-# Message types
+# Receivable message types (these need handlers)
 GET = 'get'
 PUT = 'put'
+REQ_VOTE = 'request_vote'
+VOTE = 'vote'
+APPEND = 'append_entries'
+
+# Other message types
 FAIL = 'fail'
 
 
@@ -28,25 +39,42 @@ class KVStore(object):
     def __init__(self, my_id: str, replica_ids: list):
         self.my_id = my_id
         self.replica_ids = replica_ids
+        self.majority = (len(replica_ids) + 1) // 2 + 1
 
         self.sock = self.build_socket()
 
         self.state = State.FOLLOWER
+        self.term = 0
         self.leader = 'FFFF'
+
+        self.votes = 0
+        self.voted_for = None
+
+        self.timeout = None
+        self.reset_timeout()
 
         self.leader_handlers = {
             GET: self.fail_request,
-            PUT: self.fail_request
+            PUT: self.fail_request,
+            REQ_VOTE: self.drop_message,
+            VOTE: self.drop_message,
+            APPEND: self.drop_message
         }
 
         self.candidate_handlers = {
             GET: self.fail_request,
-            PUT: self.fail_request
+            PUT: self.fail_request,
+            REQ_VOTE: self.drop_message,
+            VOTE: self.count_vote,
+            APPEND: self.drop_out
         }
 
         self.follower_handlers = {
             GET: self.fail_request,
-            PUT: self.fail_request
+            PUT: self.fail_request,
+            REQ_VOTE: self.cast_vote,
+            VOTE: self.drop_message,
+            APPEND: self.append_entries
         }
 
     def build_socket(self):
@@ -56,10 +84,94 @@ class KVStore(object):
 
         return sock
 
+    def fail_request(self, msg: dict):
+        """Send a failed response to the requester."""
+        self.send_message(self.build_base_response(msg, FAIL))
+
+    def drop_message(self, msg: dict):
+        """Drop the given message."""
+        pass
+
     def run(self):
         """Run the key-value store."""
         while True:
             self.receive_message()
+
+            if self.timed_out():
+                if self.state is State.LEADER:
+                    self.send_appends()
+                elif self.state is [State.CANDIDATE, State.FOLLOWER]:
+                    self.start_election()
+                else:
+                    self.invalid_state()
+
+    def timed_out(self) -> bool:
+        return self.timeout - time() <= 0
+
+    def start_election(self):
+        self.term += 1
+        self.state = State.CANDIDATE
+        self.voted_for = self.my_id
+        self.votes = 1
+
+        self.reset_timeout()
+
+        for replica_id in self.replica_ids:
+            self.send_message(self.build_base_message(replica_id, REQ_VOTE))
+
+    def reset_timeout(self):
+        """Reset the timeout."""
+        if self.state is State.LEADER:
+            self.timeout = time() + HEARTBEAT_INTERVAL
+        elif self.state in [State.CANDIDATE, State.FOLLOWER]:
+            self.timeout = time() + uniform(ELECTION_TIMEOUT_INTERVAL[0], ELECTION_TIMEOUT_INTERVAL[1])
+        else:
+            self.invalid_state()
+
+    def count_vote(self, msg: dict):  # Parameter unused, but required to match interface
+        self.votes += 1
+
+        if self.votes >= self.majority:
+            self.state = State.LEADER
+            self.leader = self.my_id
+            self.reset_votes()
+
+            self.send_appends()
+
+    def send_appends(self):
+        for replica_id in self.replica_ids:
+            self.send_message(self.build_base_message(replica_id, APPEND))
+
+    def append_entries(self, msg: dict):
+        if msg['term'] > self.term:
+            self.set_term(msg['term'])
+            self.leader = msg['leader']
+        elif msg['term'] == self.term:
+            self.reset_timeout()
+
+            # TODO log replication
+        else:
+            self.drop_message(msg)
+
+    def drop_out(self, msg: dict):
+        if msg['term'] >= self.term:
+            self.set_term(msg['term'])
+            self.state = State.FOLLOWER
+            self.leader = msg['src']
+
+    def set_term(self, term: int):
+        self.term = term
+        self.reset_votes()
+
+    def reset_votes(self):
+        self.voted_for = None
+        self.votes = 0
+
+    def cast_vote(self, msg: dict):
+        self.reset_timeout()
+        if msg['term'] >= self.term and (not self.voted_for or self.voted_for == msg['src']):
+            self.voted_for = msg['src']
+
 
     def receive_message(self):
         """Receive and handle a message from the socket."""
@@ -81,19 +193,19 @@ class KVStore(object):
             elif self.state is State.FOLLOWER:
                 self.follower_handlers[msg_t](msg)
             else:
-                raise RuntimeError('Invalid state: {}'.format(self.state))
+                self.invalid_state()
 
-    def fail_request(self, msg: dict):
-        """Send a failed response to the requester."""
-        self.send_message(self.build_base_response(msg, FAIL))
+    def invalid_state(self):
+        """Throw an error for an invalid state."""
+        raise RuntimeError('Invalid state: {}'.format(self.state))
 
-    def build_base_response(self, msg: dict, msg_type: str):
+    def build_base_response(self, msg: dict, msg_type: str) -> dict:
         """Build a response to the message."""
         resp = self.build_base_message(msg['src'], msg_type)
         resp['MID'] = msg['MID']
         return resp
 
-    def build_base_message(self, dest: str, msg_type: str):
+    def build_base_message(self, dest: str, msg_type: str) -> dict:
         """Build the base message."""
         return {
             'src': self.my_id,
