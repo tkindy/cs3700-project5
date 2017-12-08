@@ -35,15 +35,18 @@ class KVStore(object):
         self.leader = 'FFFF'
 
         self.leader_handlers = {
-
+            GET: self.fail_request,
+            PUT: self.fail_request
         }
 
         self.candidate_handlers = {
-
+            GET: self.fail_request,
+            PUT: self.fail_request
         }
 
         self.follower_handlers = {
-
+            GET: self.fail_request,
+            PUT: self.fail_request
         }
 
     def build_socket(self):
