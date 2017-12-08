@@ -191,9 +191,11 @@ class KVStore(object):
             self.send_message(req)
 
     def count_vote(self, msg: dict):  # Parameter unused, but required to match interface
+        self.debug('received vote from {}'.format(msg['src']))
         self.votes += 1
 
         if self.votes >= self.majority:
+            self.debug('I won!')
             self.state = State.LEADER
             self.set_leader(self.my_id)
             self.reset_votes()
