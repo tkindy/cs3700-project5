@@ -122,15 +122,6 @@ class KVStore(object):
         for replica_id in self.replica_ids:
             self.send_message(self.build_base_message(replica_id, REQ_VOTE))
 
-    def reset_timeout(self):
-        """Reset the timeout."""
-        if self.state is State.LEADER:
-            self.timeout = time() + HEARTBEAT_INTERVAL
-        elif self.state in [State.CANDIDATE, State.FOLLOWER]:
-            self.timeout = time() + uniform(ELECTION_TIMEOUT_INTERVAL[0], ELECTION_TIMEOUT_INTERVAL[1])
-        else:
-            self.invalid_state()
-
     def count_vote(self, msg: dict):  # Parameter unused, but required to match interface
         self.votes += 1
 
@@ -142,6 +133,8 @@ class KVStore(object):
             self.send_appends()
 
     def send_appends(self):
+        self.reset_timeout()
+
         for replica_id in self.replica_ids:
             self.send_message(self.build_base_message(replica_id, APPEND))
 
@@ -151,6 +144,7 @@ class KVStore(object):
             self.leader = msg['leader']
 
             self.debug('leader is {}'.format(self.leader))
+            self.reset_timeout()
 
         elif msg['term'] == self.term:
             self.reset_timeout()
@@ -183,6 +177,15 @@ class KVStore(object):
             self.voted_for = msg['src']
             self.debug('voting for {}'.format(self.voted_for))
             self.send_message(self.build_base_message(msg['src'], VOTE))
+
+    def reset_timeout(self):
+        """Reset the timeout."""
+        if self.state is State.LEADER:
+            self.timeout = time() + HEARTBEAT_INTERVAL
+        elif self.state in [State.CANDIDATE, State.FOLLOWER]:
+            self.timeout = time() + uniform(ELECTION_TIMEOUT_INTERVAL[0], ELECTION_TIMEOUT_INTERVAL[1])
+        else:
+            self.invalid_state()
 
     def receive_message(self):
         """Receive and handle a message from the socket."""
