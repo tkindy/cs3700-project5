@@ -168,6 +168,7 @@ class KVStore(object):
         self.votes = 0
 
     def redirect_request(self, msg: dict):
+        self.debug('redirecting to {}'.format(self.leader))
         self.send_message(self.build_base_response(msg, REDIRECT))
 
     def cast_vote(self, msg: dict):
