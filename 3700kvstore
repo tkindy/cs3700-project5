@@ -285,7 +285,6 @@ class KVStore(object):
 
     def cast_vote(self, msg: dict):
         self.reset_timeout()
-        self.leader = 'FFFF'
 
         prev_entry = self.log[-1] if self.log else DUMMY_ENTRY
         prev_term = prev_entry['term']
