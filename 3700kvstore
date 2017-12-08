@@ -130,6 +130,7 @@ class KVStore(object):
         self.next_indices[msg['src']] = msg['next_index']
 
     def fail_replication(self, msg: dict):
+        self.debug('failing {}'.format(msg['src']))
         self.next_indices[msg['src']] -= 1
 
     def fail_request(self, msg: dict):
