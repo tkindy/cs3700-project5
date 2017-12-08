@@ -258,9 +258,9 @@ class KVStore(object):
             self.start_following(msg['term'], msg['src'])
 
     def pass_torch(self, msg: dict):
-        if msg['term'] > self.term:
+        if msg['term'] >= self.term:
             self.state = State.FOLLOWER
-            self.set_term(msg['term'] - 1)
+            self.set_term(msg['term'])
             self.cast_vote(msg)
 
     def start_following(self, term: int, leader: str):
@@ -285,6 +285,7 @@ class KVStore(object):
 
     def cast_vote(self, msg: dict):
         self.reset_timeout()
+        self.leader = 'FFFF'
 
         prev_entry = self.log[-1] if self.log else DUMMY_ENTRY
         prev_term = prev_entry['term']
