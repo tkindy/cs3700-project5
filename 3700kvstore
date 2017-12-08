@@ -144,7 +144,7 @@ class KVStore(object):
         self.votes = 1  # start by voting for yourself
         self.leader = 'FFFF'
 
-        self.debug('start election for term {}'.format(self.term))
+        # self.debug('start election for term {}'.format(self.term))
 
         self.reset_timeout()
 
@@ -316,7 +316,7 @@ class KVStore(object):
 
     def set_leader(self, leader: str):
         self.leader = leader
-        self.debug('{} is leader for term {}'.format(self.leader, self.term))
+        # self.debug('{} is leader for term {}'.format(self.leader, self.term))
 
         if self.leader == self.my_id:
             self.state = State.LEADER
