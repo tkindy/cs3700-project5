@@ -230,36 +230,32 @@ class KVStore(object):
             self.send_message(msg)
 
     def append_entries(self, msg: dict):
-        if msg['term'] > self.term:
-            self.set_term(msg['term'])
-            self.leader = msg['leader']
-
-            self.reset_timeout()
-
-        elif msg['term'] == self.term:
-            self.reset_timeout()
-            prev_index = msg['prev_index']
-
-            if prev_index == -1 or \
-                    (len(self.log) - 1 >= prev_index and self.log[prev_index]['term'] == msg['prev_term']):
-                self.log = self.log[:prev_index + 1]
-                self.log += msg['entries']
-
-                resp = self.build_base_message(self.leader, OK)
-                resp['next_index'] = len(self.log)
-                self.send_message(resp)
-            else:
-                self.send_message(self.build_base_message(self.leader, FAIL))
-
-            new_committed = min(msg['committed'], len(self.log) - 1)
-
-            for entry in self.log[self.committed + 1:new_committed + 1]:
-                self.data[entry['key']] = entry['value']
-
-            self.committed = new_committed
-
-        else:
+        if msg['term'] < self.term:
             self.drop_message(msg)
+            return
+
+        self.set_term(msg['term'])
+        self.leader = msg['leader']
+        prev_index = msg['prev_index']
+
+        if prev_index == -1 or \
+                (len(self.log) - 1 >= prev_index and self.log[prev_index]['term'] == msg['prev_term']):
+            self.log = self.log[:prev_index + 1]
+            self.log += msg['entries']
+
+            resp = self.build_base_message(self.leader, OK)
+            resp['next_index'] = len(self.log)
+            self.send_message(resp)
+        else:
+            self.send_message(self.build_base_message(self.leader, FAIL))
+
+        new_committed = min(msg['committed'], len(self.log) - 1)
+
+        for entry in self.log[self.committed + 1:new_committed + 1]:
+            self.data[entry['key']] = entry['value']
+
+        self.committed = new_committed
+        self.reset_timeout()
 
     def drop_out(self, msg: dict):
         if msg['term'] >= self.term:
