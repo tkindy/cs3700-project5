@@ -209,6 +209,8 @@ class KVStore(object):
             self.reset_timeout()
             prev_index = msg['prev_index']
 
+            self.debug('prev_index: {]'.format(msg['prev_index']))
+
             if prev_index == -1 or \
                     (len(self.log) - 1 >= prev_index and self.log[prev_index]['term'] == msg['prev_term']):
                 self.log = self.log[:prev_index + 1]
