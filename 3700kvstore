@@ -129,8 +129,8 @@ class KVStore(object):
 
     def jump_term(self, msg: dict):
         if msg['term'] > self.term:
-            self.set_term(msg['term'])
             self.state = State.FOLLOWER
+            self.set_term(msg['term'])
             self.set_leader(msg['leader'])
             self.cast_vote(msg)
 
@@ -291,6 +291,7 @@ class KVStore(object):
                 (msg['prev_term'] > prev_term or
                  (msg['prev_term'] == prev_term and
                   msg['prev_index'] >= prev_index)):
+            self.debug('voting for {} for term {}'.format(msg['src'], msg['term']))
             self.voted_for = msg['src']
             self.send_message(self.build_base_message(msg['src'], VOTE))
 
