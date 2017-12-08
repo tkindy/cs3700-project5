@@ -177,6 +177,8 @@ class KVStore(object):
         self.voted_for = self.my_id
         self.votes = 1
 
+        self.debug('starting election for term {}'.format(self.term))
+
         self.reset_timeout()
 
         for replica_id in self.replica_ids:
