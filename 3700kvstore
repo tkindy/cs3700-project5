@@ -222,7 +222,6 @@ class KVStore(object):
             self.send_message(msg)
 
     def append_entries(self, msg: dict):
-        self.debug('appending')
         if msg['term'] < self.term:
             self.drop_message(msg)
             return
@@ -232,7 +231,6 @@ class KVStore(object):
 
         if prev_index == -1 or \
                 (len(self.log) - 1 >= prev_index and self.log[prev_index]['term'] == msg['prev_term']):
-            self.debug('adding to my log')
             self.log = self.log[:prev_index + 1]
             self.log += msg['entries']
 
@@ -243,6 +241,7 @@ class KVStore(object):
             self.send_message(self.build_base_message(self.leader, FAIL))
 
         new_committed = min(msg['committed'], len(self.log) - 1)
+        self.debug('committed up to {}'.format(new_committed))
 
         for entry in self.log[self.committed + 1:new_committed + 1]:
             self.data[entry['key']] = entry['value']
