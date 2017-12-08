@@ -163,7 +163,7 @@ class KVStore(object):
         new_committed = nexts[self.majority - 2] - 1
 
         for entry in self.log[self.committed + 1:new_committed + 1]:
-            self.debug('completing {}'.format(entry['MID']))
+            # self.debug('completing {}'.format(entry['MID']))
             self.data[entry['key']] = entry['value']
             self.send_message(self.build_base_response({'src': entry['src'], 'MID': entry['MID']}, OK))
 
@@ -178,7 +178,7 @@ class KVStore(object):
         self.voted_for = self.my_id
         self.votes = 1
 
-        self.debug('starting election for term {}'.format(self.term))
+        # self.debug('starting election for term {}'.format(self.term))
 
         self.reset_timeout()
 
@@ -224,10 +224,7 @@ class KVStore(object):
             self.drop_message(msg)
             return
 
-        elif msg['term'] > self.term:
-            self.start_following(msg['term'], msg['src'])
-            self.reset_timeout()
-
+        self.start_following(msg['term'], msg['src'])
         prev_index = msg['prev_index']
 
         if prev_index == -1 or \
@@ -278,7 +275,7 @@ class KVStore(object):
 
     def set_leader(self, leader: str):
         self.leader = leader
-        self.debug('{} is leader for term {}'.format(self.leader, self.term))
+        # self.debug('{} is leader for term {}'.format(self.leader, self.term))
 
     def redirect_request(self, msg: dict):
         self.send_message(self.build_base_response(msg, REDIRECT))
@@ -296,7 +293,7 @@ class KVStore(object):
                 (msg['prev_term'] > prev_term or
                  (msg['prev_term'] == prev_term and
                   msg['prev_index'] >= prev_index)):
-            self.debug('voting for {} for term {}'.format(msg['src'], msg['term']))
+            # self.debug('voting for {} for term {}'.format(msg['src'], msg['term']))
             self.voted_for = msg['src']
             self.send_message(self.build_base_message(msg['src'], VOTE))
 
