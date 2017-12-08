@@ -145,6 +145,7 @@ class KVStore(object):
         """Run the key-value store."""
         while True:
             self.receive_message()
+            self.debug(self.leader)
 
             if self.state is State.LEADER:
                 self.commit_entries()
