@@ -73,9 +73,9 @@ class KVStore(object):
         self.leader_handlers = {
             GET: self.get_key,
             PUT: self.put_key,
-            REQ_VOTE: self.drop_message,
+            REQ_VOTE: self.resign_and_vote,
             VOTE: self.drop_message,
-            APPEND: self.drop_message,
+            APPEND: self.resign,
             OK: self.confirm_replication,
             FAIL: self.fail_replication
         }
@@ -140,6 +140,19 @@ class KVStore(object):
     def drop_message(self, msg: dict):
         """Drop the given message."""
         pass
+
+    def resign_and_vote(self, msg: dict):
+        if msg['term'] > self.term:
+            self.do_resign(msg)
+            self.cast_vote(msg)
+
+    def resign(self, msg: dict):
+        if msg['term'] > self.term:
+            self.do_resign(msg)
+
+    def do_resign(self, msg: dict):
+        self.state = State.FOLLOWER
+        self.set_term(msg['term'])
 
     def run(self):
         """Run the key-value store."""
@@ -267,6 +280,10 @@ class KVStore(object):
 
     def cast_vote(self, msg: dict):
         self.reset_timeout()
+
+        if msg['term'] > self.term:
+            self.set_term(msg['term'])
+
         prev_entry = self.log[-1] if self.log else DUMMY_ENTRY
         prev_term = prev_entry['term']
         prev_index = prev_entry['index']
