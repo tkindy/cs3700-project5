@@ -83,7 +83,7 @@ class KVStore(object):
         self.candidate_handlers = {
             GET: self.fail_request,
             PUT: self.fail_request,
-            REQ_VOTE: self.drop_message,
+            REQ_VOTE: self.pass_torch,
             VOTE: self.count_vote,
             APPEND: self.drop_out,
             OK: self.drop_message,
