@@ -239,7 +239,6 @@ class KVStore(object):
                 self.data[entry['key']] = entry['value']
 
             self.committed = new_committed
-            self.debug('committed up to {}'.format(self.committed))
 
         else:
             self.drop_message(msg)
