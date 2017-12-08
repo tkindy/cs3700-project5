@@ -168,6 +168,7 @@ class KVStore(object):
             self.send_message(self.build_base_response({'src': entry['src'], 'MID': entry['MID']}, OK))
 
         self.committed = new_committed
+        self.debug('{} {}'.format(nexts, self.committed))
 
     def timed_out(self) -> bool:
         return self.timeout - time() <= 0
@@ -352,7 +353,6 @@ class KVStore(object):
 
     def send_message(self, msg: dict):
         """Send a message through the socket."""
-        self.debug('sending {} to {}'.format(msg['type'], msg['dst']))
         self.sock.send(dumps(msg).encode('utf-8'))
 
     def debug(self, msg: str):
