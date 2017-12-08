@@ -13,7 +13,7 @@ RECV_TIMEOUT = 0.01
 # Maximum number of bytes to receive at once
 MAX_RECEIVE_BYTES = 2 ** 16
 # Random election timeout interval, in seconds
-ELECTION_TIMEOUT_INTERVAL = (0.25, 0.5)
+ELECTION_TIMEOUT_INTERVAL = (0.15, 0.3)
 # Maximum time between leader heartbeats, in seconds
 HEARTBEAT_INTERVAL = ELECTION_TIMEOUT_INTERVAL[0] / 2
 # Maximum number of entries to send a follower in one request
